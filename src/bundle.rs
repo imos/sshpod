@@ -7,8 +7,13 @@ use std::path::PathBuf;
 
 pub const BUNDLE_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "+bundle1");
 
-pub async fn detect_remote_arch(namespace: &str, pod: &str, container: &str) -> Result<String> {
-    let machine = kubectl::exec_capture(namespace, pod, container, &["uname", "-m"])
+pub async fn detect_remote_arch(
+    context: Option<&str>,
+    namespace: &str,
+    pod: &str,
+    container: &str,
+) -> Result<String> {
+    let machine = kubectl::exec_capture(context, namespace, pod, container, &["uname", "-m"])
         .await
         .context("failed to detect remote arch via uname -m")?;
     let arch = match machine.trim() {
@@ -22,6 +27,7 @@ pub async fn detect_remote_arch(namespace: &str, pod: &str, container: &str) -> 
 }
 
 pub async fn ensure_bundle(
+    context: Option<&str>,
     namespace: &str,
     pod: &str,
     container: &str,
@@ -31,9 +37,11 @@ pub async fn ensure_bundle(
     let version_path = format!("{}/bundle/VERSION", base);
     let arch_path = format!("{}/bundle/ARCH", base);
     let remote_version =
-        kubectl::exec_capture_optional(namespace, pod, container, &["cat", &version_path]).await?;
+        kubectl::exec_capture_optional(context, namespace, pod, container, &["cat", &version_path])
+            .await?;
     let remote_arch =
-        kubectl::exec_capture_optional(namespace, pod, container, &["cat", &arch_path]).await?;
+        kubectl::exec_capture_optional(context, namespace, pod, container, &["cat", &arch_path])
+            .await?;
 
     if remote_version.as_deref() == Some(BUNDLE_VERSION) && remote_arch.as_deref() == Some(arch) {
         return Ok(());
@@ -52,6 +60,7 @@ pub async fn ensure_bundle(
 
     let install = format!("umask 077; mkdir -p \"{base}/bundle\"; tar xJf - -C \"{base}/bundle\"");
     kubectl::exec_with_input(
+        context,
         namespace,
         pod,
         container,

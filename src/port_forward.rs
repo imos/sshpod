@@ -12,8 +12,16 @@ pub struct PortForward {
 }
 
 impl PortForward {
-    pub async fn start(namespace: &str, pod: &str, remote_port: u16) -> Result<(PortForward, u16)> {
+    pub async fn start(
+        context: Option<&str>,
+        namespace: &str,
+        pod: &str,
+        remote_port: u16,
+    ) -> Result<(PortForward, u16)> {
         let mut cmd = Command::new("kubectl");
+        if let Some(ctx) = context {
+            cmd.arg("--context").arg(ctx);
+        }
         cmd.args([
             "port-forward",
             "--address",
