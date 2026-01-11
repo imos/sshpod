@@ -150,6 +150,19 @@ fn locate_bundle(arch: &str) -> Result<PathBuf> {
     );
 }
 
+#[cfg(test)]
+mod tests {
+    use super::decompress_tar_xz;
+
+    #[test]
+    fn decompress_smoke() {
+        // Simple tar.xz archive containing one file with contents "hello\n"
+        let data = include_bytes!("../tests/data/hello.tar.xz");
+        let out = decompress_tar_xz(data).expect("decompress");
+        assert!(out.windows(5).any(|w| w == b"hello"));
+    }
+}
+
 fn decompress_tar_xz(data: &[u8]) -> Result<Vec<u8>> {
     let mut decoder = XzDecoder::new(data);
     let mut buf = Vec::new();

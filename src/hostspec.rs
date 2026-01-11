@@ -102,3 +102,48 @@ fn parse_target(token: &str) -> Result<Target, HostSpecError> {
     }
     Ok(Target::Pod(token.to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_pod_with_namespace_and_context() {
+        let spec =
+            parse("pod--app.namespace--ns.context--ctx.sshpod").expect("should parse successfully");
+        assert_eq!(spec.target, Target::Pod("app".into()));
+        assert_eq!(spec.namespace.as_deref(), Some("ns"));
+        assert_eq!(spec.context, "ctx");
+        assert!(spec.container.is_none());
+    }
+
+    #[test]
+    fn parse_pod_with_context_only_namespace_defaults() {
+        let spec = parse("pod--app.context--ctx.sshpod").expect("should parse successfully");
+        assert_eq!(spec.target, Target::Pod("app".into()));
+        assert!(spec.namespace.is_none());
+        assert_eq!(spec.context, "ctx");
+    }
+
+    #[test]
+    fn parse_deployment_with_container_prefix() {
+        let spec = parse("container--web.deployment--api.namespace--ns.context--ctx.sshpod")
+            .expect("should parse successfully");
+        assert_eq!(spec.target, Target::Deployment("api".into()));
+        assert_eq!(spec.container.as_deref(), Some("web"));
+        assert_eq!(spec.namespace.as_deref(), Some("ns"));
+        assert_eq!(spec.context, "ctx");
+    }
+
+    #[test]
+    fn reject_missing_context() {
+        let err = parse("pod--app.namespace--ns.sshpod").unwrap_err();
+        assert!(matches!(err, HostSpecError::InvalidFormat));
+    }
+
+    #[test]
+    fn reject_missing_suffix() {
+        let err = parse("pod--app.context--ctx").unwrap_err();
+        assert!(matches!(err, HostSpecError::MissingSuffix));
+    }
+}

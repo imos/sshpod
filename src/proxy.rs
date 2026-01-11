@@ -32,7 +32,8 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
         namespace = kubectl::get_context_namespace(&host.context).await?;
     }
     let ns_str = namespace.as_deref().unwrap_or("");
-    let context = Some(host.context.as_str());
+    let context_str = host.context.as_str();
+    let context = Some(context_str);
 
     let pod_name = match &host.target {
         Target::Pod(pod) => pod.clone(),
@@ -45,9 +46,7 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
     };
     info!(
         "[sshpod] resolved pod: {} (namespace={}, context={})",
-        pod_name,
-        ns_str,
-        context.unwrap_or("<default>")
+        pod_name, ns_str, context_str
     );
 
     let pod_info = kubectl::get_pod_info(context, ns_str, &pod_name)

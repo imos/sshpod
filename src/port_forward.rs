@@ -71,13 +71,10 @@ impl PortForward {
                         }
                     }
                     line = stderr_reader.next_line() => {
-                        match line.context("failed to read port-forward stderr")? {
-                            Some(l) => {
-                                if log_output {
-                                    eprintln!("[port-forward] {}", l)
-                                }
-                            },
-                            None => {}
+                        if let Some(l) = line.context("failed to read port-forward stderr")? {
+                            if log_output {
+                                eprintln!("[port-forward] {}", l)
+                            }
                         }
                     }
                     status = child.wait() => {

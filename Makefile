@@ -7,7 +7,7 @@ OPENSSH_VERSION ?= 9.7p1
 BUNDLE_VERSION ?= $(shell sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)+bundle1
 BUNDLE_FILES := $(foreach arch,$(ARCHES),$(BUNDLES_DIR)/openssh-bundle-$(arch).tar.xz)
 
-.PHONY: all build install fmt check clean bundles
+.PHONY: all build install lint format check clean bundles test
 
 all: build
 
@@ -18,11 +18,18 @@ install: build
 	./target/release/sshpod configure
 	$(CARGO) install --path . --locked --root $(INSTALL_ROOT)
 
-fmt:
+lint:
+	$(CARGO) clippy --all-targets -- --deny=warnings
+	$(CARGO) fmt -- --check
+
+format:
 	$(CARGO) fmt
 
 check:
 	$(CARGO) check
+
+test:
+	$(CARGO) test --all-features
 
 clean:
 	$(CARGO) clean
