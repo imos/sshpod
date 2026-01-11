@@ -32,6 +32,9 @@ pub struct ProxyArgs {
     /// OpenSSH-supplied port (unused but accepted for compatibility)
     #[arg(long)]
     pub port: Option<u16>,
+    /// Log level: error, info, debug
+    #[arg(long, default_value = "info")]
+    pub log_level: String,
 }
 
 pub async fn run() -> Result<()> {

@@ -3,8 +3,8 @@ use thiserror::Error;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostSpec {
     pub target: Target,
-    pub namespace: String,
-    pub context: Option<String>,
+    pub namespace: Option<String>,
+    pub context: String,
     pub container: Option<String>,
 }
 
@@ -20,7 +20,7 @@ pub enum HostSpecError {
     #[error("hostname must end with .sshpod")]
     MissingSuffix,
     #[error(
-        "hostname must be pod--<pod>.namespace--<namespace>[.context--<context>].sshpod (container--<container>. prefix optional) or deployment--/job-- variants"
+        "hostname must be pod--<pod>[.namespace--<namespace>].context--<context>.sshpod (container--<container>. prefix optional) or deployment--/job-- variants"
     )]
     InvalidFormat,
 }
@@ -46,40 +46,34 @@ pub fn parse(host: &str) -> Result<HostSpec, HostSpecError> {
 
     let target_token = parts.get(idx).ok_or(HostSpecError::InvalidFormat)?;
     idx += 1;
-    let namespace_token = parts.get(idx).ok_or(HostSpecError::InvalidFormat)?;
+    let mut namespace = None;
+    if let Some(ns_token) = parts.get(idx) {
+        if let Some(rest) = ns_token.strip_prefix("namespace--") {
+            namespace = if rest.is_empty() {
+                return Err(HostSpecError::InvalidFormat);
+            } else {
+                Some(rest.to_string())
+            };
+            idx += 1;
+        }
+    }
+    let context_token = parts.get(idx).ok_or(HostSpecError::InvalidFormat)?;
     idx += 1;
-    let context_token = if let Some(token) = parts.get(idx) {
-        idx += 1;
-        Some(*token)
-    } else {
-        None
-    };
     if idx != parts.len() {
         return Err(HostSpecError::InvalidFormat);
     }
 
-    let namespace = namespace_token
-        .strip_prefix("namespace--")
+    let context = context_token
+        .strip_prefix("context--")
         .ok_or(HostSpecError::InvalidFormat)?;
-    if namespace.is_empty() {
+    if context.is_empty() {
         return Err(HostSpecError::InvalidFormat);
     }
-    let context = if let Some(ctx) = context_token {
-        let ctx = ctx
-            .strip_prefix("context--")
-            .ok_or(HostSpecError::InvalidFormat)?;
-        if ctx.is_empty() {
-            return Err(HostSpecError::InvalidFormat);
-        }
-        Some(ctx.to_string())
-    } else {
-        None
-    };
 
     Ok(HostSpec {
         target: parse_target(target_token)?,
-        namespace: namespace.to_string(),
-        context,
+        namespace,
+        context: context.to_string(),
         container,
     })
 }

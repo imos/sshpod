@@ -34,6 +34,11 @@ pub async fn run() -> Result<()> {
 
     let updated = merge_config(&current, &render_block());
 
+    if current == updated {
+        println!("No changes needed for {}", config_path.display());
+        return Ok(());
+    }
+
     if let Some(backup) = backup_path.as_ref() {
         fs::copy(&config_path, backup)
             .with_context(|| format!("failed to create backup {}", backup.as_path().display()))?;

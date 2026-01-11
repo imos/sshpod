@@ -17,6 +17,7 @@ impl PortForward {
         namespace: &str,
         pod: &str,
         remote_port: u16,
+        log_output: bool,
     ) -> Result<(PortForward, u16)> {
         let mut cmd = Command::new("kubectl");
         if let Some(ctx) = context {
@@ -57,17 +58,25 @@ impl PortForward {
                         match line.context("failed to read port-forward stdout")? {
                             Some(l) => {
                                 if let Some(port) = parse_port(&l) {
-                                    eprintln!("[port-forward] {}", l);
+                                    if log_output {
+                                        eprintln!("[port-forward] {}", l);
+                                    }
                                     break Ok(port);
                                 }
-                                eprintln!("[port-forward] {}", l);
+                                if log_output {
+                                    eprintln!("[port-forward] {}", l);
+                                }
                             }
                             None => break Err(anyhow!("kubectl port-forward exited before reporting a port")),
                         }
                     }
                     line = stderr_reader.next_line() => {
                         match line.context("failed to read port-forward stderr")? {
-                            Some(l) => eprintln!("[port-forward] {}", l),
+                            Some(l) => {
+                                if log_output {
+                                    eprintln!("[port-forward] {}", l)
+                                }
+                            },
                             None => {}
                         }
                     }
@@ -83,13 +92,17 @@ impl PortForward {
 
         let stdout_task = tokio::spawn(async move {
             while let Some(line) = stdout_reader.next_line().await? {
-                eprintln!("[port-forward] {}", line);
+                if log_output {
+                    eprintln!("[port-forward] {}", line);
+                }
             }
             Ok::<_, anyhow::Error>(())
         });
         let stderr_task = tokio::spawn(async move {
             while let Some(line) = stderr_reader.next_line().await? {
-                eprintln!("[port-forward] {}", line);
+                if log_output {
+                    eprintln!("[port-forward] {}", line);
+                }
             }
             Ok::<_, anyhow::Error>(())
         });
