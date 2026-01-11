@@ -1,14 +1,23 @@
 use crate::{embedded, kubectl};
 use anyhow::{bail, Context, Result};
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::env;
+use std::io::{Read, Write};
 use std::path::PathBuf;
+use xz2::read::XzDecoder;
 
 pub const BUNDLE_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "+bundle1");
 
-pub async fn detect_remote_arch(namespace: &str, pod: &str, container: &str) -> Result<String> {
-    let machine = kubectl::exec_capture(namespace, pod, container, &["uname", "-m"])
+pub async fn detect_remote_arch(
+    context: Option<&str>,
+    namespace: &str,
+    pod: &str,
+    container: &str,
+) -> Result<String> {
+    let machine = kubectl::exec_capture(context, namespace, pod, container, &["uname", "-m"])
         .await
         .context("failed to detect remote arch via uname -m")?;
     let arch = match machine.trim() {
@@ -22,6 +31,7 @@ pub async fn detect_remote_arch(namespace: &str, pod: &str, container: &str) -> 
 }
 
 pub async fn ensure_bundle(
+    context: Option<&str>,
     namespace: &str,
     pod: &str,
     container: &str,
@@ -31,9 +41,11 @@ pub async fn ensure_bundle(
     let version_path = format!("{}/bundle/VERSION", base);
     let arch_path = format!("{}/bundle/ARCH", base);
     let remote_version =
-        kubectl::exec_capture_optional(namespace, pod, container, &["cat", &version_path]).await?;
+        kubectl::exec_capture_optional(context, namespace, pod, container, &["cat", &version_path])
+            .await?;
     let remote_arch =
-        kubectl::exec_capture_optional(namespace, pod, container, &["cat", &arch_path]).await?;
+        kubectl::exec_capture_optional(context, namespace, pod, container, &["cat", &arch_path])
+            .await?;
 
     if remote_version.as_deref() == Some(BUNDLE_VERSION) && remote_arch.as_deref() == Some(arch) {
         return Ok(());
@@ -51,7 +63,8 @@ pub async fn ensure_bundle(
     };
 
     let install = format!("umask 077; mkdir -p \"{base}/bundle\"; tar xJf - -C \"{base}/bundle\"");
-    kubectl::exec_with_input(
+    match kubectl::exec_with_input(
+        context,
         namespace,
         pod,
         container,
@@ -59,7 +72,51 @@ pub async fn ensure_bundle(
         &bundle_data,
     )
     .await
-    .with_context(|| format!("failed to install bundle into {}", base))?;
+    {
+        Ok(_) => return Ok(()),
+        Err(first_err) => {
+            let tar_data =
+                decompress_tar_xz(&bundle_data).context("failed to decompress tar.xz locally")?;
+            let mut gz = GzEncoder::new(Vec::new(), Compression::default());
+            gz.write_all(&tar_data).context("failed to gzip bundle")?;
+            let gz_data = gz.finish().context("failed to finalize gzip")?;
+
+            let install_gz =
+                format!("umask 077; mkdir -p \"{base}/bundle\"; tar xzf - -C \"{base}/bundle\"");
+            match kubectl::exec_with_input(
+                context,
+                namespace,
+                pod,
+                container,
+                &["sh", "-c", &install_gz],
+                &gz_data,
+            )
+            .await
+            {
+                Ok(_) => return Ok(()),
+                Err(second_err) => {
+                    let install_plain = format!(
+                        "umask 077; mkdir -p \"{base}/bundle\"; tar xf - -C \"{base}/bundle\""
+                    );
+                    kubectl::exec_with_input(
+                        context,
+                        namespace,
+                        pod,
+                        container,
+                        &["sh", "-c", &install_plain],
+                        &tar_data,
+                    )
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "failed to install bundle into {} (xz error: {}; gzip error: {})",
+                            base, first_err, second_err
+                        )
+                    })?;
+                }
+            }
+        }
+    }
 
     Ok(())
 }
@@ -91,4 +148,13 @@ fn locate_bundle(arch: &str) -> Result<PathBuf> {
         "bundle file {} not found; place it alongside the binary or in ./bundles",
         filename
     );
+}
+
+fn decompress_tar_xz(data: &[u8]) -> Result<Vec<u8>> {
+    let mut decoder = XzDecoder::new(data);
+    let mut buf = Vec::new();
+    decoder
+        .read_to_end(&mut buf)
+        .context("failed to decompress xz")?;
+    Ok(buf)
 }

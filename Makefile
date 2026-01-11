@@ -14,10 +14,9 @@ all: build
 build:
 	$(CARGO) build --release
 
-install: bundles
+install: build
+	./target/release/sshpod configure
 	$(CARGO) install --path . --locked --root $(INSTALL_ROOT)
-	@mkdir -p $(INSTALL_ROOT)/bundles
-	@(cd $(BUNDLES_DIR) && tar cf - .) | (cd $(INSTALL_ROOT)/bundles && tar xf -)
 
 fmt:
 	$(CARGO) fmt

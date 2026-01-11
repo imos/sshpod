@@ -1,50 +1,76 @@
 use crate::bundle;
 use crate::cli::ProxyArgs;
-use crate::hostspec;
+use crate::hostspec::{self, Target};
 use crate::keys;
 use crate::kubectl;
 use crate::port_forward::PortForward;
 use crate::proxy_io;
 use crate::remote;
 use anyhow::{bail, Context, Result};
+use log::{info, Level};
+use std::io::Write;
 use tokio::net::TcpStream;
 
+fn init_logger(level_arg: &str) {
+    let mut builder = env_logger::Builder::new();
+    builder.format(|buf, record| writeln!(buf, "{}", record.args()));
+    builder.parse_filters(level_arg);
+    let _ = builder.try_init();
+}
+
 pub async fn run(args: ProxyArgs) -> Result<()> {
+    init_logger(&args.log_level);
     let host = hostspec::parse(&args.host).context("failed to parse hostspec")?;
     let login_user = args
         .user
         .filter(|u| !u.is_empty())
         .unwrap_or_else(whoami::username);
 
-    let namespace = kubectl::resolve_namespace(&host.namespace_hint)
-        .await
-        .with_context(|| {
-            format!(
-                "failed to resolve namespace or context `{}`",
-                host.namespace_hint
-            )
-        })?;
+    kubectl::ensure_context_exists(&host.context).await?;
+    let mut namespace = host.namespace.clone();
+    if namespace.is_none() {
+        namespace = kubectl::get_context_namespace(&host.context).await?;
+    }
+    let ns_str = namespace.as_deref().unwrap_or("");
+    let context = Some(host.context.as_str());
 
-    let pod_info = kubectl::get_pod_info(&namespace, &host.pod)
+    let pod_name = match &host.target {
+        Target::Pod(pod) => pod.clone(),
+        Target::Deployment(dep) => kubectl::choose_pod_for_deployment(context, ns_str, dep)
+            .await
+            .with_context(|| format!("failed to select pod from deployment `{}`", dep))?,
+        Target::Job(job) => kubectl::choose_pod_for_job(context, ns_str, job)
+            .await
+            .with_context(|| format!("failed to select pod from job `{}`", job))?,
+    };
+    info!(
+        "[sshpod] resolved pod: {} (namespace={}, context={})",
+        pod_name,
+        ns_str,
+        context.unwrap_or("<default>")
+    );
+
+    let pod_info = kubectl::get_pod_info(context, ns_str, &pod_name)
         .await
-        .with_context(|| format!("failed to inspect pod {}.{}", host.pod, namespace))?;
+        .with_context(|| format!("failed to inspect pod {}.{}", pod_name, ns_str))?;
 
     let container = match host.container.as_ref() {
         Some(c) => {
             if pod_info.containers.iter().any(|name| name == c) {
                 c.clone()
             } else {
-                bail!("container `{}` not found in pod {}", c, host.pod);
+                bail!("container `{}` not found in pod {}", c, pod_name);
             }
         }
         None => {
             if pod_info.containers.len() == 1 {
                 pod_info.containers[0].clone()
             } else {
-                bail!("This Pod has multiple containers. Use <container>.<pod>.<namespace>.sshpod to specify the target container.");
+                bail!("This Pod has multiple containers. Use container--<container>.pod--<pod>.namespace--<namespace>[.context--<context>].sshpod to specify the target container.");
             }
         }
     };
+    info!("[sshpod] resolved container: {}", container);
 
     let base = format!("/tmp/sshpod/{}/{}", pod_info.uid, container);
 
@@ -52,25 +78,75 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
         .await
         .context("failed to ensure ~/.cache/sshpod/id_ed25519 exists")?;
 
-    remote::try_acquire_lock(&namespace, &host.pod, &container, &base).await;
-    remote::assert_login_user_allowed(&namespace, &host.pod, &container, &login_user).await?;
+    remote::try_acquire_lock(
+        context,
+        namespace.as_deref().unwrap_or(""),
+        &pod_name,
+        &container,
+        &base,
+    )
+    .await;
+    remote::assert_login_user_allowed(
+        context,
+        namespace.as_deref().unwrap_or(""),
+        &pod_name,
+        &container,
+        &login_user,
+    )
+    .await?;
 
-    let arch = bundle::detect_remote_arch(&namespace, &host.pod, &container)
-        .await
-        .context("failed to detect remote arch")?;
-    bundle::ensure_bundle(&namespace, &host.pod, &container, &base, &arch).await?;
+    let arch = bundle::detect_remote_arch(
+        context,
+        namespace.as_deref().unwrap_or(""),
+        &pod_name,
+        &container,
+    )
+    .await
+    .context("failed to detect remote arch")?;
+    info!("[sshpod] remote architecture: {}", arch);
+    bundle::ensure_bundle(
+        context,
+        namespace.as_deref().unwrap_or(""),
+        &pod_name,
+        &container,
+        &base,
+        &arch,
+    )
+    .await?;
+    info!("[sshpod] sshd bundle ready for pod {}", pod_name);
 
+    info!("[sshpod] starting/ensuring sshd in pod {}", pod_name);
     let remote_port = remote::ensure_sshd_running(
-        &namespace,
-        &host.pod,
+        context,
+        namespace.as_deref().unwrap_or(""),
+        &pod_name,
         &container,
         &base,
         &login_user,
         &local_key.public_key,
     )
     .await?;
+    info!(
+        "[sshpod] sshd is listening on 127.0.0.1:{} (pod {})",
+        remote_port, pod_name
+    );
 
-    let (mut forward, local_port) = PortForward::start(&namespace, &host.pod, remote_port).await?;
+    info!(
+        "[sshpod] starting port-forward to {}:{}",
+        pod_name, remote_port
+    );
+    let (mut forward, local_port) = PortForward::start(
+        context,
+        namespace.as_deref().unwrap_or(""),
+        &pod_name,
+        remote_port,
+        log::log_enabled!(Level::Debug),
+    )
+    .await?;
+    info!(
+        "[sshpod] port-forward established: localhost:{} -> {}:{}",
+        local_port, pod_name, remote_port
+    );
 
     let stream = TcpStream::connect(("127.0.0.1", local_port))
         .await

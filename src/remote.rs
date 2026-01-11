@@ -1,25 +1,39 @@
 use crate::kubectl;
 use anyhow::{bail, Context, Result};
+use tokio::time::{timeout, Duration};
 
-pub async fn try_acquire_lock(namespace: &str, pod: &str, container: &str, base: &str) {
+pub async fn try_acquire_lock(
+    context: Option<&str>,
+    namespace: &str,
+    pod: &str,
+    container: &str,
+    base: &str,
+) {
     let lock_cmd = format!("umask 077; mkdir \"{}/lock\"", base);
-    let _ =
-        kubectl::exec_capture_optional(namespace, pod, container, &["sh", "-c", &lock_cmd]).await;
+    let _ = kubectl::exec_capture_optional(
+        context,
+        namespace,
+        pod,
+        container,
+        &["sh", "-c", &lock_cmd],
+    )
+    .await;
 }
 
 pub async fn assert_login_user_allowed(
+    context: Option<&str>,
     namespace: &str,
     pod: &str,
     container: &str,
     login_user: &str,
 ) -> Result<()> {
-    let uid = kubectl::exec_capture(namespace, pod, container, &["id", "-u"])
+    let uid = kubectl::exec_capture(context, namespace, pod, container, &["id", "-u"])
         .await
         .context("failed to read remote uid")?;
     if uid.trim() == "0" {
         return Ok(());
     }
-    let remote_user = kubectl::exec_capture(namespace, pod, container, &["id", "-un"])
+    let remote_user = kubectl::exec_capture(context, namespace, pod, container, &["id", "-un"])
         .await
         .context("failed to read remote user")?;
     if remote_user.trim() != login_user {
@@ -33,6 +47,7 @@ pub async fn assert_login_user_allowed(
 }
 
 pub async fn ensure_sshd_running(
+    context: Option<&str>,
     namespace: &str,
     pod: &str,
     container: &str,
@@ -41,14 +56,19 @@ pub async fn ensure_sshd_running(
     pubkey_line: &str,
 ) -> Result<u16> {
     let script = START_SSHD_SCRIPT.as_bytes();
-    let output = kubectl::exec_with_input(
-        namespace,
-        pod,
-        container,
-        &["sh", "-s", "--", base, login_user, pubkey_line],
-        script,
+    let output = timeout(
+        Duration::from_secs(40),
+        kubectl::exec_with_input(
+            context,
+            namespace,
+            pod,
+            container,
+            &["sh", "-s", "--", base, login_user, pubkey_line],
+            script,
+        ),
     )
     .await
+    .map_err(|_| anyhow::anyhow!("starting sshd timed out after 40s"))?
     .with_context(|| format!("failed to start sshd under {}", base))?;
 
     let port: u16 = output
@@ -86,6 +106,13 @@ fi
 
 mkdir -p /tmp/empty
 chmod 755 /tmp/empty
+if ! getent passwd sshd >/dev/null 2>&1; then
+  if command -v useradd >/dev/null 2>&1; then
+    useradd -r -M -d /tmp/empty -s /sbin/nologin sshd >/dev/null 2>&1 || true
+  elif command -v adduser >/dev/null 2>&1; then
+    adduser -D -H -s /sbin/nologin -h /tmp/empty sshd >/dev/null 2>&1 || true
+  fi
+fi
 
 if [ ! -f "$BASE/hostkeys/ssh_host_ed25519_key" ]; then
   "$SSHKEYGEN" -t ed25519 -f "$BASE/hostkeys/ssh_host_ed25519_key" -N '' >/dev/null
