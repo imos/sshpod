@@ -150,6 +150,15 @@ fn locate_bundle(arch: &str) -> Result<PathBuf> {
     );
 }
 
+fn decompress_tar_xz(data: &[u8]) -> Result<Vec<u8>> {
+    let mut decoder = XzDecoder::new(data);
+    let mut buf = Vec::new();
+    decoder
+        .read_to_end(&mut buf)
+        .context("failed to decompress xz")?;
+    Ok(buf)
+}
+
 #[cfg(test)]
 mod tests {
     use super::decompress_tar_xz;
@@ -161,13 +170,4 @@ mod tests {
         let out = decompress_tar_xz(data).expect("decompress");
         assert!(out.windows(5).any(|w| w == b"hello"));
     }
-}
-
-fn decompress_tar_xz(data: &[u8]) -> Result<Vec<u8>> {
-    let mut decoder = XzDecoder::new(data);
-    let mut buf = Vec::new();
-    decoder
-        .read_to_end(&mut buf)
-        .context("failed to decompress xz")?;
-    Ok(buf)
 }

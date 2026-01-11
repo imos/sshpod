@@ -163,38 +163,6 @@ fn kubectl_base(context: Option<&str>) -> Command {
     cmd
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_is_ready_true() {
-        let pod = PodListItem {
-            metadata: PodMetadataName { name: "p".into() },
-            status: Some(PodStatus {
-                phase: Some("Running".into()),
-                conditions: Some(vec![PodCondition {
-                    type_name: "Ready".into(),
-                    status: "True".into(),
-                }]),
-            }),
-        };
-        assert!(is_ready(&pod));
-    }
-
-    #[test]
-    fn test_is_ready_false_when_not_running() {
-        let pod = PodListItem {
-            metadata: PodMetadataName { name: "p".into() },
-            status: Some(PodStatus {
-                phase: Some("Pending".into()),
-                conditions: None,
-            }),
-        };
-        assert!(!is_ready(&pod));
-    }
-}
-
 pub async fn ensure_context_exists(context: &str) -> Result<()> {
     let contexts = list_contexts().await?;
     if contexts.iter().any(|c| c == context) {
@@ -656,4 +624,36 @@ async fn exec(
         .await
         .context("failed to wait for kubectl exec")?;
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_ready_true() {
+        let pod = PodListItem {
+            metadata: PodMetadataName { name: "p".into() },
+            status: Some(PodStatus {
+                phase: Some("Running".into()),
+                conditions: Some(vec![PodCondition {
+                    type_name: "Ready".into(),
+                    status: "True".into(),
+                }]),
+            }),
+        };
+        assert!(is_ready(&pod));
+    }
+
+    #[test]
+    fn test_is_ready_false_when_not_running() {
+        let pod = PodListItem {
+            metadata: PodMetadataName { name: "p".into() },
+            status: Some(PodStatus {
+                phase: Some("Pending".into()),
+                conditions: None,
+            }),
+        };
+        assert!(!is_ready(&pod));
+    }
 }

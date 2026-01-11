@@ -27,11 +27,14 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
         .unwrap_or_else(whoami::username);
 
     kubectl::ensure_context_exists(&host.context).await?;
-    let mut namespace = host.namespace.clone();
-    if namespace.is_none() {
-        namespace = kubectl::get_context_namespace(&host.context).await?;
-    }
-    let ns_str = namespace.as_deref().unwrap_or("");
+    let namespace = if let Some(ns) = host.namespace.clone() {
+        ns
+    } else {
+        kubectl::get_context_namespace(&host.context)
+            .await?
+            .unwrap_or_default()
+    };
+    let ns_str = namespace.as_str();
     let context_str = host.context.as_str();
     let context = Some(context_str);
 
@@ -77,47 +80,20 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
         .await
         .context("failed to ensure ~/.cache/sshpod/id_ed25519 exists")?;
 
-    remote::try_acquire_lock(
-        context,
-        namespace.as_deref().unwrap_or(""),
-        &pod_name,
-        &container,
-        &base,
-    )
-    .await;
-    remote::assert_login_user_allowed(
-        context,
-        namespace.as_deref().unwrap_or(""),
-        &pod_name,
-        &container,
-        &login_user,
-    )
-    .await?;
+    remote::try_acquire_lock(context, ns_str, &pod_name, &container, &base).await;
+    remote::assert_login_user_allowed(context, ns_str, &pod_name, &container, &login_user).await?;
 
-    let arch = bundle::detect_remote_arch(
-        context,
-        namespace.as_deref().unwrap_or(""),
-        &pod_name,
-        &container,
-    )
-    .await
-    .context("failed to detect remote arch")?;
+    let arch = bundle::detect_remote_arch(context, ns_str, &pod_name, &container)
+        .await
+        .context("failed to detect remote arch")?;
     info!("[sshpod] remote architecture: {}", arch);
-    bundle::ensure_bundle(
-        context,
-        namespace.as_deref().unwrap_or(""),
-        &pod_name,
-        &container,
-        &base,
-        &arch,
-    )
-    .await?;
+    bundle::ensure_bundle(context, ns_str, &pod_name, &container, &base, &arch).await?;
     info!("[sshpod] sshd bundle ready for pod {}", pod_name);
 
     info!("[sshpod] starting/ensuring sshd in pod {}", pod_name);
     let remote_port = remote::ensure_sshd_running(
         context,
-        namespace.as_deref().unwrap_or(""),
+        ns_str,
         &pod_name,
         &container,
         &base,
@@ -136,7 +112,7 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
     );
     let (mut forward, local_port) = PortForward::start(
         context,
-        namespace.as_deref().unwrap_or(""),
+        ns_str,
         &pod_name,
         remote_port,
         log::log_enabled!(Level::Debug),

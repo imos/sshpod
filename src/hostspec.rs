@@ -20,7 +20,7 @@ pub enum HostSpecError {
     #[error("hostname must end with .sshpod")]
     MissingSuffix,
     #[error(
-        "hostname must be pod--<pod>[.namespace--<namespace>].context--<context>.sshpod (container--<container>. prefix optional) or deployment--/job-- variants"
+        "hostname must include context--<context> and one of pod--/deployment--/job-- (container-- optional, namespace-- optional), ending with .sshpod"
     )]
     InvalidFormat,
 }
@@ -31,49 +31,47 @@ pub fn parse(host: &str) -> Result<HostSpec, HostSpecError> {
         .strip_suffix(".sshpod")
         .ok_or(HostSpecError::MissingSuffix)?;
 
-    let parts = without_suffix.split('.').collect::<Vec<_>>();
-    let mut idx = 0;
     let mut container = None;
-    if let Some(token) = parts.get(idx) {
+    let mut namespace = None;
+    let mut context = None;
+    let mut target = None;
+
+    for token in without_suffix.split('.').filter(|s| !s.is_empty()) {
         if let Some(rest) = token.strip_prefix("container--") {
-            if rest.is_empty() {
+            if rest.is_empty() || container.is_some() {
                 return Err(HostSpecError::InvalidFormat);
             }
             container = Some(rest.to_string());
-            idx += 1;
+            continue;
         }
-    }
-
-    let target_token = parts.get(idx).ok_or(HostSpecError::InvalidFormat)?;
-    idx += 1;
-    let mut namespace = None;
-    if let Some(ns_token) = parts.get(idx) {
-        if let Some(rest) = ns_token.strip_prefix("namespace--") {
-            namespace = if rest.is_empty() {
+        if let Some(rest) = token.strip_prefix("namespace--") {
+            if rest.is_empty() || namespace.is_some() {
                 return Err(HostSpecError::InvalidFormat);
-            } else {
-                Some(rest.to_string())
-            };
-            idx += 1;
+            }
+            namespace = Some(rest.to_string());
+            continue;
         }
-    }
-    let context_token = parts.get(idx).ok_or(HostSpecError::InvalidFormat)?;
-    idx += 1;
-    if idx != parts.len() {
+        if let Some(rest) = token.strip_prefix("context--") {
+            if rest.is_empty() || context.is_some() {
+                return Err(HostSpecError::InvalidFormat);
+            }
+            context = Some(rest.to_string());
+            continue;
+        }
+        if target.is_none() {
+            target = Some(parse_target(token)?);
+            continue;
+        }
         return Err(HostSpecError::InvalidFormat);
     }
 
-    let context = context_token
-        .strip_prefix("context--")
-        .ok_or(HostSpecError::InvalidFormat)?;
-    if context.is_empty() {
-        return Err(HostSpecError::InvalidFormat);
-    }
+    let context = context.ok_or(HostSpecError::InvalidFormat)?;
+    let target = target.ok_or(HostSpecError::InvalidFormat)?;
 
     Ok(HostSpec {
-        target: parse_target(target_token)?,
+        target,
         namespace,
-        context: context.to_string(),
+        context,
         container,
     })
 }
