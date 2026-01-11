@@ -37,18 +37,23 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
+            arch_name: linux_amd64
             archive: tar.gz
             content_type: application/gzip
           - target: aarch64-unknown-linux-gnu
+            arch_name: linux_arm64
             archive: tar.gz
             content_type: application/gzip
-          - target: aarch64-apple-darwin
+          - target: x86_64-apple-darwin
+            arch_name: darwin_amd64
             archive: tar.gz
             content_type: application/gzip
           - target: x86_64-pc-windows-msvc
+            arch_name: windows_amd64
             archive: zip
             content_type: application/zip
           - target: aarch64-pc-windows-msvc
+            arch_name: windows_arm64
             archive: zip
             content_type: application/zip
     env:
@@ -81,7 +86,7 @@ jobs:
           ARTIFACT_DIR=artifact
           mkdir -p "$ARTIFACT_DIR"
           cp "$BIN" "$ARTIFACT_DIR/"
-          ASSET="sshpod-${VERSION}-${{ matrix.target }}.${{ matrix.archive }}"
+          ASSET="sshpod_${VERSION}_${{ matrix.arch_name }}.${{ matrix.archive }}"
           if [[ "${{ matrix.archive }}" == "zip" ]]; then
             (cd "$ARTIFACT_DIR" && zip -9 "../$ASSET" *)
           else
