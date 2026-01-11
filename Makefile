@@ -14,10 +14,8 @@ all: build
 build:
 	$(CARGO) build --release
 
-configure: build
+install: build
 	./target/release/sshpod configure
-
-install:
 	$(CARGO) install --path . --locked --root $(INSTALL_ROOT)
 
 fmt:
