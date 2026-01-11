@@ -138,10 +138,7 @@ while [ $i -lt 30 ]; do
   i=$((i+1))
   PORT="$(rand_port)"
 
-  if [ -f "$BASE/bundle/sshd_config.in" ]; then
-    sed -e "s|__BASE__|$BASE|g" -e "s|__PORT__|$PORT|g" "$BASE/bundle/sshd_config.in" > "$BASE/sshd_config"
-  else
-    cat > "$BASE/sshd_config" <<EOF
+  cat > "$BASE/sshd_config" <<EOF
 ListenAddress 127.0.0.1
 Port $PORT
 HostKey $BASE/hostkeys/ssh_host_ed25519_key
@@ -160,7 +157,6 @@ Subsystem sftp internal-sftp
 LogLevel VERBOSE
 PermitUserEnvironment yes
 EOF
-  fi
 
   printf 'SetEnv PATH=%s\n' "$REMOTE_PATH" >> "$BASE/sshd_config"
   for key in $ENV_EXPORTS; do
