@@ -1,5 +1,5 @@
-use crate::proxy;
-use anyhow::Result;
+use crate::{install, proxy};
+use anyhow::{anyhow, Result};
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
@@ -10,13 +10,15 @@ use clap::{Args, Parser, Subcommand};
 )]
 pub struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
 enum Commands {
     /// ProxyCommand entry point
     Proxy(ProxyArgs),
+    /// Update ~/.ssh/config with the sshpod ProxyCommand block
+    Configure,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -35,7 +37,13 @@ pub struct ProxyArgs {
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Proxy(args) => proxy::run(args).await?,
+        Some(Commands::Proxy(args)) => proxy::run(args).await?,
+        Some(Commands::Configure) => install::run().await?,
+        None => {
+            return Err(anyhow!(
+                "no command provided. Use the configure or proxy subcommands."
+            ))
+        }
     }
     Ok(())
 }
