@@ -69,7 +69,7 @@ pub async fn ensure_sshd_running(
     pubkey_line: &str,
 ) -> Result<u16> {
     let script = START_SSHD_SCRIPT.as_bytes();
-    let result = timeout(Duration::from_secs(40), {
+    let output = timeout(Duration::from_secs(40), {
         kubectl::exec_with_input_target(
             target,
             &["sh", "-s", "--", base, login_user, pubkey_line],
@@ -77,20 +77,8 @@ pub async fn ensure_sshd_running(
         )
     })
     .await
-    .map_err(|_| anyhow::anyhow!("starting sshd timed out after 40s"))?;
-
-    let output = match result {
-        Ok(out) => out,
-        Err(err) => {
-            if let Some(log) = read_start_log(target, base).await {
-                return Err(err.context(format!(
-                    "failed to start sshd under {} (start.log below)\n{}",
-                    base, log
-                )));
-            }
-            return Err(err.context(format!("failed to start sshd under {}", base)));
-        }
-    };
+    .map_err(|_| anyhow::anyhow!("starting sshd timed out after 40s"))?
+    .with_context(|| format!("failed to start sshd under {}", base))?;
 
     let port: u16 = output
         .trim()
@@ -99,24 +87,8 @@ pub async fn ensure_sshd_running(
     Ok(port)
 }
 
-async fn read_start_log(target: &RemoteTarget, base: &str) -> Option<String> {
-    match kubectl::exec_capture_optional_target(
-        target,
-        &["sh", "-c", &format!("tail -n 200 {}/logs/start.log", base)],
-    )
-    .await
-    {
-        Ok(Some(log)) => Some(log),
-        Ok(None) => Some(format!("start.log unavailable at {}/logs/start.log", base)),
-        Err(err) => Some(format!(
-            "failed to read start.log at {}/logs/start.log: {}",
-            base, err
-        )),
-    }
-}
-
 const START_SSHD_SCRIPT: &str = r#"#!/bin/sh
-set -eux
+set -eu
 
 BASE="$1"
 LOGIN_USER="$2"
@@ -125,10 +97,10 @@ SSHD="$BASE/bundle/sshd"
 ENV_FILE="$BASE/environment"
 
 exec 3>&1
-exec 4>&2
-exec >"$BASE/logs/start.log" 2>&1
+exec 1>&2
+
 debug_log() {
-  printf '[sshpod-init] %s\n' "$1" >&4
+  printf '[sshpod] %s\n' "$1" >&2
 }
 
 umask 077
@@ -137,19 +109,11 @@ chmod 700 "$BASE" "$BASE/hostkeys" "$BASE/logs"
 BASE_PARENT="$(dirname "$BASE")"
 TOP_DIR="$(dirname "$BASE_PARENT")"
 chmod 711 "$TOP_DIR" "$BASE_PARENT"
-touch "$BASE/logs/start.log" || true
 debug_log "start script begin (base=$BASE user=$LOGIN_USER)"
-
-dump_and_exit() {
-  if [ -f "$BASE/logs/start.log" ]; then
-    cat "$BASE/logs/start.log" >&4 2>/dev/null || true
-  fi
-  exit "$1"
-}
 
 get_home() {
   if command -v getent >/dev/null 2>&1; then
-    getent passwd "$1" 2>/dev/null | awk -F: '{print $6}'
+    getent passwd "$1" | awk -F: '{print $6}'
   elif [ -f /etc/passwd ]; then
     awk -F: -v u="$1" '$1==u {print $6}' /etc/passwd | head -n1
   fi
@@ -157,7 +121,7 @@ get_home() {
 
 have_user() {
   if command -v getent >/dev/null 2>&1; then
-    getent passwd "$1" >/dev/null 2>&1
+    getent passwd "$1"
   elif [ -f /etc/passwd ]; then
     awk -F: -v u="$1" '$1==u {found=1} END{exit found?0:1}' /etc/passwd
   else
@@ -171,33 +135,32 @@ fi
 grep -qxF "$PUBKEY_LINE" "$BASE/authorized_keys" || printf '%s\n' "$PUBKEY_LINE" >> "$BASE/authorized_keys"
 chmod 600 "$BASE/authorized_keys"
 if [ -n "$LOGIN_USER" ]; then
-  chown "$LOGIN_USER":"$LOGIN_USER" "$BASE" "$BASE/authorized_keys" 2>/dev/null || true
+  chown "$LOGIN_USER":"$LOGIN_USER" "$BASE" "$BASE/authorized_keys" || true
 fi
-debug_log "authorized_keys ready"
 
 mkdir -p /tmp/empty
 chmod 755 /tmp/empty
 if ! have_user sshd; then
+  debug_log "creating sshd user"
   if command -v useradd >/dev/null 2>&1; then
-    useradd -r -M -d /tmp/empty -s /sbin/nologin sshd >/dev/null 2>&1 || true
+    useradd -r -M -d /tmp/empty -s /sbin/nologin sshd || true
   elif command -v adduser >/dev/null 2>&1; then
-    adduser -D -H -s /sbin/nologin -h /tmp/empty sshd >/dev/null 2>&1 || true
+    adduser -D -H -s /sbin/nologin -h /tmp/empty sshd || true
   fi
 fi
-debug_log "sshd user ensured"
 
 if [ ! -f "$BASE/hostkeys/ssh_host_ed25519_key" ]; then
   echo "host key missing at $BASE/hostkeys/ssh_host_ed25519_key" >&2
-  dump_and_exit 1
+  exit 1
 fi
 chmod 600 "$BASE/hostkeys/"*
-debug_log "host keys ready"
 
-if [ -f "$BASE/sshd.pid" ] && kill -0 "$(cat "$BASE/sshd.pid")" 2>/dev/null && [ -f "$BASE/sshd.port" ]; then
+if [ -f "$BASE/sshd.pid" ] && kill -0 "$(cat "$BASE/sshd.pid")" && [ -f "$BASE/sshd.port" ]; then
+  debug_log "sshd already running"
   cat "$BASE/sshd.port" >&3
   exit 0
 fi
-debug_log "starting fresh sshd instance"
+debug_log "sshd not running, starting new instance"
 
 rand_port() {
   val="$(od -An -N2 -tu2 /dev/urandom | tr -d ' ')"
@@ -256,7 +219,7 @@ EOF
     chmod 700 "$USER_HOME/.ssh"
     chmod 600 "$USER_HOME/.ssh/environment"
     if [ -n "$LOGIN_USER" ]; then
-      chown "$LOGIN_USER":"$LOGIN_USER" "$USER_HOME/.ssh" "$USER_HOME/.ssh/environment" 2>/dev/null || true
+      chown "$LOGIN_USER":"$LOGIN_USER" "$USER_HOME/.ssh" "$USER_HOME/.ssh/environment" || true
     fi
   fi
 
@@ -272,16 +235,16 @@ EOF
   } > "$ENV_FILE"
   chmod 600 "$ENV_FILE"
   if [ -n "$LOGIN_USER" ]; then
-    chown "$LOGIN_USER":"$LOGIN_USER" "$ENV_FILE" 2>/dev/null || true
+    chown "$LOGIN_USER":"$LOGIN_USER" "$ENV_FILE" || true
   fi
 
   chmod 600 "$BASE/sshd_config"
   rm -f "$BASE/sshd.pid"
   debug_log "launching sshd on $PORT"
-  "$SSHD" -f "$BASE/sshd_config" -E "$BASE/logs/sshd.log" </dev/null >&4 2>&4 || true
+  "$SSHD" -f "$BASE/sshd_config" -E "$BASE/logs/sshd.log" </dev/null || true
   j=0
   while [ $j -lt 10 ]; do
-    if [ -f "$BASE/sshd.pid" ] && kill -0 "$(cat "$BASE/sshd.pid")" 2>/dev/null; then
+    if [ -f "$BASE/sshd.pid" ] && kill -0 "$(cat "$BASE/sshd.pid")"; then
       echo "$PORT" > "$BASE/sshd.port"
       chmod 600 "$BASE/sshd.pid" "$BASE/sshd.port"
       echo "$PORT" >&3
@@ -294,7 +257,7 @@ EOF
 done
 
 echo "sshd did not start" >&2
-dump_and_exit 1
+exit 1
 "#;
 
 #[cfg(test)]
