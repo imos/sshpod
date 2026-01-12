@@ -69,7 +69,7 @@ pub async fn ensure_sshd_running(
     pubkey_line: &str,
 ) -> Result<u16> {
     let script = START_SSHD_SCRIPT.as_bytes();
-    let result = timeout(Duration::from_secs(40), {
+    let output = timeout(Duration::from_secs(40), {
         kubectl::exec_with_input_target(
             target,
             &["sh", "-s", "--", base, login_user, pubkey_line],
@@ -77,42 +77,14 @@ pub async fn ensure_sshd_running(
         )
     })
     .await
-    .map_err(|_| anyhow::anyhow!("starting sshd timed out after 40s"))?;
-
-    let output = match result {
-        Ok(out) => out,
-        Err(err) => {
-            if let Some(log) = read_start_log(target, base).await {
-                return Err(err.context(format!(
-                    "failed to start sshd under {} (start.log below)\n{}",
-                    base, log
-                )));
-            }
-            return Err(err.context(format!("failed to start sshd under {}", base)));
-        }
-    };
+    .map_err(|_| anyhow::anyhow!("starting sshd timed out after 40s"))?
+    .with_context(|| format!("failed to start sshd under {}", base))?;
 
     let port: u16 = output
         .trim()
         .parse()
         .with_context(|| format!("unexpected sshd port output: {}", output))?;
     Ok(port)
-}
-
-async fn read_start_log(target: &RemoteTarget, base: &str) -> Option<String> {
-    match kubectl::exec_capture_optional_target(
-        target,
-        &["sh", "-c", &format!("tail -n 200 {}/logs/start.log", base)],
-    )
-    .await
-    {
-        Ok(Some(log)) => Some(log),
-        Ok(None) => Some(format!("start.log unavailable at {}/logs/start.log", base)),
-        Err(err) => Some(format!(
-            "failed to read start.log at {}/logs/start.log: {}",
-            base, err
-        )),
-    }
 }
 
 const START_SSHD_SCRIPT: &str = r#"#!/bin/sh
@@ -125,10 +97,10 @@ SSHD="$BASE/bundle/sshd"
 ENV_FILE="$BASE/environment"
 
 exec 3>&1
-exec 4>&2
-exec >"$BASE/logs/start.log" 2>&1
+exec 1>&2
+
 debug_log() {
-  printf '[sshpod-init] %s\n' "$1" >&4
+  printf '[sshpod-init] %s\n' "$1" >&2
 }
 
 umask 077
@@ -137,15 +109,7 @@ chmod 700 "$BASE" "$BASE/hostkeys" "$BASE/logs"
 BASE_PARENT="$(dirname "$BASE")"
 TOP_DIR="$(dirname "$BASE_PARENT")"
 chmod 711 "$TOP_DIR" "$BASE_PARENT"
-touch "$BASE/logs/start.log" || true
 debug_log "start script begin (base=$BASE user=$LOGIN_USER)"
-
-dump_and_exit() {
-  if [ -f "$BASE/logs/start.log" ]; then
-    cat "$BASE/logs/start.log" >&4 2>/dev/null || true
-  fi
-  exit "$1"
-}
 
 get_home() {
   if command -v getent >/dev/null 2>&1; then
@@ -188,7 +152,7 @@ debug_log "sshd user ensured"
 
 if [ ! -f "$BASE/hostkeys/ssh_host_ed25519_key" ]; then
   echo "host key missing at $BASE/hostkeys/ssh_host_ed25519_key" >&2
-  dump_and_exit 1
+  exit 1
 fi
 chmod 600 "$BASE/hostkeys/"*
 debug_log "host keys ready"
@@ -294,7 +258,7 @@ EOF
 done
 
 echo "sshd did not start" >&2
-dump_and_exit 1
+exit 1
 "#;
 
 #[cfg(test)]
