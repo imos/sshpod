@@ -1,6 +1,6 @@
 # sshpod
 
-`sshpod` は、手元の OpenSSH クライアントから Kubernetes Pod に SSH できるようにするツールです。`~/.ssh/config` の ProxyCommand を書き換え、`ssh pod--...context--....sshpod` の接続時に `kubectl` 経由で Pod 内に `sshd` を起動・転送します。
+`sshpod` は、手元の OpenSSH クライアントから Kubernetes Pod に SSH できるようにするツールです。`~/.ssh/config` の ProxyCommand を書き換え、`ssh pod--???.context--???.sshpod` の接続時に `kubectl` 経由で Pod 内に `sshd` を起動・転送します。
 
 ## インストール
 
