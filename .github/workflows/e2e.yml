@@ -100,5 +100,5 @@ jobs:
           set -euxo pipefail
           POD_NAME="sshpod-e2e-${{ matrix.name }}"
           KUBE_CONTEXT="$(kubectl config current-context)"
-          ssh "root@pod--${POD_NAME}.namespace--default.context--${KUBE_CONTEXT}.sshpod" -- printf 'ssh-ok\n' | tee /tmp/ssh_output
-          grep -qx 'ssh-ok' /tmp/ssh_output
+          ssh "root@pod--${POD_NAME}.namespace--default.context--${KUBE_CONTEXT}.sshpod" -- echo 'ssh-ok' | tee /tmp/ssh_output
+          grep 'ssh-ok' /tmp/ssh_output
