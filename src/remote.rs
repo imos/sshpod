@@ -112,16 +112,16 @@ chmod 711 "$TOP_DIR" "$BASE_PARENT"
 debug_log "start script begin (base=$BASE user=$LOGIN_USER)"
 
 get_home() {
-  if command -v getent >/dev/null 2>&1; then
-    getent passwd "$1" 2>/dev/null | awk -F: '{print $6}'
+  if command -v getent; then
+    getent passwd "$1" | awk -F: '{print $6}'
   elif [ -f /etc/passwd ]; then
     awk -F: -v u="$1" '$1==u {print $6}' /etc/passwd | head -n1
   fi
 }
 
 have_user() {
-  if command -v getent >/dev/null 2>&1; then
-    getent passwd "$1" >/dev/null 2>&1
+  if command -v getent; then
+    getent passwd "$1"
   elif [ -f /etc/passwd ]; then
     awk -F: -v u="$1" '$1==u {found=1} END{exit found?0:1}' /etc/passwd
   else
@@ -135,17 +135,17 @@ fi
 grep -qxF "$PUBKEY_LINE" "$BASE/authorized_keys" || printf '%s\n' "$PUBKEY_LINE" >> "$BASE/authorized_keys"
 chmod 600 "$BASE/authorized_keys"
 if [ -n "$LOGIN_USER" ]; then
-  chown "$LOGIN_USER":"$LOGIN_USER" "$BASE" "$BASE/authorized_keys" 2>/dev/null || true
+  chown "$LOGIN_USER":"$LOGIN_USER" "$BASE" "$BASE/authorized_keys" || true
 fi
 debug_log "authorized_keys ready"
 
 mkdir -p /tmp/empty
 chmod 755 /tmp/empty
 if ! have_user sshd; then
-  if command -v useradd >/dev/null 2>&1; then
-    useradd -r -M -d /tmp/empty -s /sbin/nologin sshd >/dev/null 2>&1 || true
-  elif command -v adduser >/dev/null 2>&1; then
-    adduser -D -H -s /sbin/nologin -h /tmp/empty sshd >/dev/null 2>&1 || true
+  if command -v useradd; then
+    useradd -r -M -d /tmp/empty -s /sbin/nologin sshd || true
+  elif command -v adduser; then
+    adduser -D -H -s /sbin/nologin -h /tmp/empty sshd || true
   fi
 fi
 debug_log "sshd user ensured"
@@ -157,7 +157,7 @@ fi
 chmod 600 "$BASE/hostkeys/"*
 debug_log "host keys ready"
 
-if [ -f "$BASE/sshd.pid" ] && kill -0 "$(cat "$BASE/sshd.pid")" 2>/dev/null && [ -f "$BASE/sshd.port" ]; then
+if [ -f "$BASE/sshd.pid" ] && kill -0 "$(cat "$BASE/sshd.pid")" && [ -f "$BASE/sshd.port" ]; then
   cat "$BASE/sshd.port" >&3
   exit 0
 fi
@@ -220,7 +220,7 @@ EOF
     chmod 700 "$USER_HOME/.ssh"
     chmod 600 "$USER_HOME/.ssh/environment"
     if [ -n "$LOGIN_USER" ]; then
-      chown "$LOGIN_USER":"$LOGIN_USER" "$USER_HOME/.ssh" "$USER_HOME/.ssh/environment" 2>/dev/null || true
+      chown "$LOGIN_USER":"$LOGIN_USER" "$USER_HOME/.ssh" "$USER_HOME/.ssh/environment" || true
     fi
   fi
 
@@ -236,16 +236,16 @@ EOF
   } > "$ENV_FILE"
   chmod 600 "$ENV_FILE"
   if [ -n "$LOGIN_USER" ]; then
-    chown "$LOGIN_USER":"$LOGIN_USER" "$ENV_FILE" 2>/dev/null || true
+    chown "$LOGIN_USER":"$LOGIN_USER" "$ENV_FILE" || true
   fi
 
   chmod 600 "$BASE/sshd_config"
   rm -f "$BASE/sshd.pid"
   debug_log "launching sshd on $PORT"
-  "$SSHD" -f "$BASE/sshd_config" -E "$BASE/logs/sshd.log" </dev/null >&4 2>&4 || true
+  "$SSHD" -f "$BASE/sshd_config" -E "$BASE/logs/sshd.log" </dev/null || true
   j=0
   while [ $j -lt 10 ]; do
-    if [ -f "$BASE/sshd.pid" ] && kill -0 "$(cat "$BASE/sshd.pid")" 2>/dev/null; then
+    if [ -f "$BASE/sshd.pid" ] && kill -0 "$(cat "$BASE/sshd.pid")"; then
       echo "$PORT" > "$BASE/sshd.port"
       chmod 600 "$BASE/sshd.pid" "$BASE/sshd.port"
       echo "$PORT" >&3
