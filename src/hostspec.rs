@@ -105,44 +105,64 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_pod_with_namespace_and_context() {
-        let spec =
-            parse("pod--app.namespace--ns.context--ctx.sshpod").expect("should parse successfully");
-        assert_eq!(spec.target, Target::Pod("app".into()));
-        assert_eq!(spec.namespace.as_deref(), Some("ns"));
-        assert_eq!(spec.context.as_deref(), Some("ctx"));
-        assert!(spec.container.is_none());
-    }
-
-    #[test]
-    fn parse_pod_with_context_only_namespace_defaults() {
-        let spec = parse("pod--app.context--ctx.sshpod").expect("should parse successfully");
-        assert_eq!(spec.target, Target::Pod("app".into()));
-        assert!(spec.namespace.is_none());
-        assert_eq!(spec.context.as_deref(), Some("ctx"));
-    }
-
-    #[test]
-    fn parse_deployment_with_container_prefix() {
-        let spec = parse("container--web.deployment--api.namespace--ns.context--ctx.sshpod")
-            .expect("should parse successfully");
-        assert_eq!(spec.target, Target::Deployment("api".into()));
-        assert_eq!(spec.container.as_deref(), Some("web"));
-        assert_eq!(spec.namespace.as_deref(), Some("ns"));
-        assert_eq!(spec.context.as_deref(), Some("ctx"));
-    }
-
-    #[test]
-    fn parse_without_context() {
-        let spec = parse("pod--app.namespace--ns.sshpod").expect("should parse without context");
-        assert_eq!(spec.context, None);
-        assert_eq!(spec.namespace.as_deref(), Some("ns"));
-        assert_eq!(spec.target, Target::Pod("app".into()));
-    }
-
-    #[test]
     fn reject_missing_suffix() {
         let err = parse("pod--app.context--ctx").unwrap_err();
         assert!(matches!(err, HostSpecError::MissingSuffix));
+    }
+
+    #[test]
+    fn reject_duplicate_tokens() {
+        assert!(parse("pod--a.pod--b.context--ctx.sshpod").is_err());
+        assert!(parse("namespace--n.namespace--m.pod--a.context--ctx.sshpod").is_err());
+        assert!(parse("container--x.container--y.pod--a.context--ctx.sshpod").is_err());
+        assert!(parse("context--a.context--b.pod--a.sshpod").is_err());
+    }
+
+    #[test]
+    fn reject_unknown_prefix() {
+        assert!(parse("foo--bar.pod--a.context--ctx.sshpod").is_err());
+    }
+
+    #[test]
+    fn dot_collapse_handling() {
+        // Leading empty segment plus empty pod token should still be rejected
+        assert!(parse(".pod--.context--ctx.sshpod").is_err());
+        // Extra dots are ignored by the parser; this should parse like a single-dot variant
+        let spec = parse("pod--app..context--ctx.sshpod").expect("double dots should parse");
+        assert_eq!(spec.target, Target::Pod("app".into()));
+        assert_eq!(spec.context.as_deref(), Some("ctx"));
+    }
+
+    #[test]
+    fn round_trip_common_patterns() {
+        let cases = [
+            ("pod--a.context--c.sshpod", ("a", Some("c"), None, None)),
+            (
+                "pod--a.namespace--n.context--c.sshpod",
+                ("a", Some("c"), Some("n"), None),
+            ),
+            (
+                "deployment--d.namespace--n.context--c.sshpod",
+                ("d", Some("c"), Some("n"), None),
+            ),
+            ("job--j.context--c.sshpod", ("j", Some("c"), None, None)),
+            (
+                "container--x.pod--a.namespace--n.context--c.sshpod",
+                ("a", Some("c"), Some("n"), Some("x")),
+            ),
+            (
+                "pod--app.namespace--ns.sshpod",
+                ("app", None, Some("ns"), None),
+            ),
+        ];
+        for (input, (name, ctx, ns, container)) in cases {
+            let spec = parse(input).expect("should parse");
+            match &spec.target {
+                Target::Pod(p) | Target::Deployment(p) | Target::Job(p) => assert_eq!(p, name),
+            }
+            assert_eq!(spec.context.as_deref(), ctx);
+            assert_eq!(spec.namespace.as_deref(), ns);
+            assert_eq!(spec.container.as_deref(), container);
+        }
     }
 }
