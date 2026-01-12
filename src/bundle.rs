@@ -65,19 +65,21 @@ pub async fn ensure_bundle(target: &RemoteTarget, base: &str, arch: &str) -> Res
     );
     let mut sshd_data: Option<Vec<u8>> = None;
 
-    let xz_result = try_install_xz(target, &bundle_data, &install_xz).await;
-    if xz_result.is_ok() {
-        info!("[sshpod] bundle install completed");
-        return Ok(());
-    }
-    let xz_err = xz_result.err().unwrap();
+    let xz_err = match try_install_xz(target, &bundle_data, &install_xz).await {
+        Ok(_) => {
+            info!("[sshpod] bundle install completed");
+            return Ok(());
+        }
+        Err(e) => e,
+    };
 
-    let gzip_result = try_install_gzip(target, &bundle_data, &install_gz, &mut sshd_data).await;
-    if gzip_result.is_ok() {
-        info!("[sshpod] bundle install completed");
-        return Ok(());
-    }
-    let gzip_err = gzip_result.err().unwrap();
+    let gzip_err = match try_install_gzip(target, &bundle_data, &install_gz, &mut sshd_data).await {
+        Ok(_) => {
+            info!("[sshpod] bundle install completed");
+            return Ok(());
+        }
+        Err(e) => e,
+    };
 
     let sshd_data = ensure_plain_data(&bundle_data, &mut sshd_data)
         .context("failed to prepare sshd payload for plain install")?;
