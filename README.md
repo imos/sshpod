@@ -1,20 +1,23 @@
+[🌐 **English**] [[🇯🇵 Japanese](README.ja.md)]
+
 # sshpod
 
-`sshpod` lets you SSH into a Kubernetes Pod from your regular OpenSSH client. It rewrites `~/.ssh/config` to use a ProxyCommand so that `ssh pod--<pod-name>.context--<context-name>.sshpod` starts a pod-local `sshd` via `kubectl` and forwards your session.
+`sshpod` makes Kubernetes Pods reachable from your existing OpenSSH client. It spins up a short-lived `sshd` inside the target container via `kubectl exec`, then connects to it through `kubectl port-forward` using `*.sshpod` hostnames defined in your SSH config.
 
-## Install
+## Quick start
 
-### Option 1: automatic
+### Automatic install
 ```bash
 curl -fsSL https://raw.githubusercontent.com/imos/sshpod/main/install.sh | sh -s -- --yes
 ```
+Installs the latest release to `~/.local/bin` (override with `--prefix`) and runs `sshpod configure` without prompting when `--yes` is supplied.
 
-### Option 2: manual
-- Download `sshpod` from the release page and put it on your PATH.
-- Add this to `~/.ssh/config` (the installer writes it for you):
+### Manual install
+1. Download the release asset for your OS/arch and place the `sshpod` binary on your PATH (for example `~/.local/bin/sshpod`).
+2. Run `sshpod configure` (backs up `~/.ssh/config` and rewrites the sshpod block), or add the block below yourself—adjust the path if you installed elsewhere:
 ```sshconfig
 Host *.sshpod
-  ProxyCommand sshpod proxy --host %h --user %r --port %p
+  ProxyCommand ~/.local/bin/sshpod proxy --host %h --user %r --port %p
   StrictHostKeyChecking no
   UserKnownHostsFile /dev/null
   GlobalKnownHostsFile /dev/null
@@ -26,23 +29,27 @@ Host *.sshpod
 ```
 
 ## Usage
+With the ProxyCommand block in place, use `ssh`, `scp`, or `sftp` against `*.sshpod` hostnames:
 ```bash
-ssh root@deployment--<deployment-name>.namespace--<namespace-name>.context--<context-name>.sshpod
+ssh root@pod--api.namespace--default.context--prod.sshpod
+ssh app@deployment--web.namespace--app.context--dev.sshpod
+ssh app@container--sidecar.pod--debug.namespace--tools.context--dev.sshpod
+scp ./local.tgz ubuntu@job--batch.namespace--etl.context--dev.sshpod:/tmp/
 ```
-- `context` is required.
-- `namespace` is optional; when omitted, the default namespace of the context is used.
-- `container--<container-name>.` prefix is needed only for multi-container Pods.
-- Resource types: `pod--<pod-name>`, `deployment--<deployment-name>`, `job--<job-name>`.
-- The SSH user must match the user inside the container.
+- `.sshpod` suffix is required; no DNS entry is needed.
+- Targets: `pod--<pod>` (default if you omit the prefix), `deployment--<deployment>`, `job--<job>`; deployments/jobs pick a ready Pod automatically.
+- Optional pieces: `container--<container>` (required for multi-container Pods), `namespace--<namespace>` (falls back to the namespace set on the context, otherwise the cluster default), `context--<context>` (defaults to your current `kubectl` context).
+- Pods running as non-root require you to SSH as that user; root Pods accept any SSH user.
 
 ## Requirements
-- Local: `kubectl` configured for the target cluster; OpenSSH client (`ssh`, `scp`, `sftp`).
-- Pod side: `amd64` or `arm64`, `sh` and `tar` available, `/tmp` writable. `xz` is not required; sshpod will fall back to gzip/plain if needed.
+- Local: `kubectl` configured for the target cluster with permission to `exec` and `port-forward`; OpenSSH client tools (`ssh`/`scp`/`sftp`) and `ssh-keygen`; ability to write to `~/.ssh/config` and `~/.cache/sshpod`.
+- In the container: Linux `amd64` or `arm64`; `sh` available; `/tmp` writable. `xz`/`gzip` are optional—sshpod falls back to a plain transfer if needed—and the bundled `sshd` binary must be allowed to run.
 
-## Developer notes
+## How it works
+- `sshpod configure` writes a `Host *.sshpod` block into `~/.ssh/config` with a timestamped backup, pointing ProxyCommand at the `sshpod` binary.
+- On first connect, sshpod creates `~/.cache/sshpod/id_ed25519`, uploads an architecture-matched `sshd` bundle to `/tmp/sshpod/<pod-uid>/<container>`, installs host keys, and starts the daemon on `127.0.0.1`.
+- A `kubectl port-forward` connects your local SSH client to that in-pod `sshd`; subsequent connections reuse the bundle and host keys while they remain in `/tmp/sshpod`.
 
-Update ~/.ssh/config with the ProxyCommand block, and build/install binary and bundles under ~/.local:
-
-```bash
-make install
-```
+## Development
+- `make install` builds the release binary, runs `sshpod configure`, and installs under `~/.local`.
+- `make test` and `make lint` run the test and lint suites.
