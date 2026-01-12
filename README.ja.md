@@ -1,22 +1,30 @@
-[[🌐 English](README.md)] [🇯🇵 **Japanese**]
+[🌐 English](README.md) | [🇯🇵 Japanese](README.ja.md)
 # sshpod
 
 `sshpod` は、手元の OpenSSH から Kubernetes Pod に SSH/SCP/SFTP で接続できるようにするツールです。`kubectl exec` で対象コンテナ内に一時的な `sshd` を配置し、`kubectl port-forward` を使って `*.sshpod` ホスト名向けの ProxyCommand でつなぎます。
 
 ## クイックスタート
 
-### 方法1: 自動
+### 方法1: 自動 (Linux/macOS)
 ```bash
 curl -fsSL https://raw.githubusercontent.com/imos/sshpod/main/install.sh | sh -s -- --yes
 ```
 デフォルトで `~/.local/bin` に最新リリースをインストールし（`--prefix` で変更可）、`--yes` 指定時は確認なしで `sshpod configure` を実行します。
 
+### 方法1: 自動 (Windows PowerShell)
+PowerShell 5+:
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force; `
+  & ([scriptblock]::create((irm https://raw.githubusercontent.com/imos/sshpod/main/install.ps1))) -Yes
+```
+`-Yes` を外すと `~/.ssh/config` 更新前に確認します。
+
 ### 方法2: 手動
-1. リリースから `sshpod` をダウンロードし、PATH（例: `~/.local/bin/sshpod`）に置きます。
+1. リリースから OS/アーキテクチャに合うアセット（Linux/macOS は `.tar.gz`、Windows は `.zip`）をダウンロードし、PATH（例: `~/.local/bin/sshpod` または `~/.local/bin/sshpod.exe`）に置きます。
 2. `sshpod configure` を実行する（`~/.ssh/config` をバックアップしつつ sshpod 用ブロックを書き換えます）、または次のブロックを自分で追加してください。バイナリの設置場所に合わせてパスを調整してください:
 ```sshconfig
 Host *.sshpod
-  ProxyCommand sshpod proxy --host %h --user %r --port %p
+  ProxyCommand ~/.local/bin/sshpod proxy --host %h --user %r --port %p
   StrictHostKeyChecking no
   UserKnownHostsFile /dev/null
   GlobalKnownHostsFile /dev/null

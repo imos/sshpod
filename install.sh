@@ -1,9 +1,10 @@
 #!/usr/bin/env sh
-set -euo pipefail
+set -eu
 
 VERSION=""
 YES=0
 PREFIX="${HOME}/.local/bin"
+BASE_URL="${SSHPOD_BASE_URL:-https://github.com/imos/sshpod/releases/download}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -40,13 +41,45 @@ detect_arch() {
   echo "${os_part}_${arch_part}"
 }
 
+fetch_latest_version() {
+  api="https://api.github.com/repos/imos/sshpod/releases/latest"
+  web="https://github.com/imos/sshpod/releases/latest"
+  auth_arg=""
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    auth_arg="-H" "Authorization: Bearer ${GITHUB_TOKEN}"
+  fi
+
+  try_api() {
+    if resp=$(curl -fsSL $auth_arg "$api" 2>/dev/null); then
+      printf "%s" "$resp" | grep -m1 '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/' || true
+    fi
+  }
+
+  try_redirect() {
+    curl -fsSLI -o /dev/null -w '%{url_effective}' "$web" 2>/dev/null \
+      | sed -E 's#.*/tag/v?([^/]+)$#\1#'
+  }
+
+  version="$(try_api)"
+  if [ -z "$version" ]; then
+    version="$(try_redirect)"
+  fi
+  if [ -n "$version" ]; then
+    echo "$version"
+    return 0
+  fi
+
+  echo "Failed to determine latest version from GitHub releases." >&2
+  exit 1
+}
+
 if [ -z "$VERSION" ]; then
-  VERSION="$(curl -fsSL https://api.github.com/repos/imos/sshpod/releases/latest | grep -m1 '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/')"
+  VERSION="$(fetch_latest_version)"
 fi
 
 ARCH_NAME="$(detect_arch)"
 ASSET="sshpod_${VERSION}_${ARCH_NAME}.tar.gz"
-URL="https://github.com/imos/sshpod/releases/download/v${VERSION}/${ASSET}"
+URL="${BASE_URL%/}/v${VERSION}/${ASSET}"
 
 TMPDIR="$(mktemp -d)"
 cleanup() { rm -rf "$TMPDIR"; }
