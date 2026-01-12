@@ -79,7 +79,7 @@ jobs:
       - name: Launch test pod
         run: |
           set -euxo pipefail
-          kubectl wait --for=condition=Ready nodes --all --timeout=180s
+          kubectl wait --for=condition=Ready node --all --timeout=180s
           POD_NAME="sshpod-e2e-${{ matrix.name }}"
           kubectl run "$POD_NAME" --image="${{ matrix.image }}" --restart=Never --command -- sh -c "sleep 1000000000"
           kubectl wait --for=condition=Ready "pod/$POD_NAME" --timeout=180s
@@ -104,9 +104,12 @@ jobs:
             BatchMode yes
           EOF
 
-          ssh -F /tmp/sshpod_config "root@pod--${POD_NAME}.namespace--default.context--${KUBE_CONTEXT}.sshpod" -- sh -c 'echo ssh-ok' | tee /tmp/ssh_output
-          if ! grep -qx 'ssh-ok' /tmp/ssh_output; then
+          ssh -vvv -F /tmp/sshpod_config "root@pod--${POD_NAME}.namespace--default.context--${KUBE_CONTEXT}.sshpod" -- sh -c 'echo ssh-ok' 2>&1 | tee /tmp/ssh_output
+          if ! grep -q '^ssh-ok$' /tmp/ssh_output; then
             echo "unexpected ssh output:"
             cat /tmp/ssh_output
+            echo "=== sshd log from pod (if present) ==="
+            POD_UID="$(kubectl get pod "$POD_NAME" -o jsonpath='{.metadata.uid}')"
+            kubectl exec "$POD_NAME" -- cat "/tmp/sshpod/${POD_UID}/${POD_NAME}/logs/sshd.log" || true
             exit 1
           fi
