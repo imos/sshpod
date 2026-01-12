@@ -69,7 +69,7 @@ pub async fn ensure_sshd_running(
     pubkey_line: &str,
 ) -> Result<u16> {
     let script = START_SSHD_SCRIPT.as_bytes();
-    let output = timeout(Duration::from_secs(40), {
+    let result = timeout(Duration::from_secs(40), {
         async move {
             kubectl::exec_with_input_target(
                 target,
@@ -80,14 +80,35 @@ pub async fn ensure_sshd_running(
         }
     })
     .await
-    .map_err(|_| anyhow::anyhow!("starting sshd timed out after 40s"))?
-    .with_context(|| format!("failed to start sshd under {}", base))?;
+    .map_err(|_| anyhow::anyhow!("starting sshd timed out after 40s"))?;
+
+    let output = match result {
+        Ok(Ok(out)) => out,
+        Ok(Err(err)) => {
+            if let Some(log) = read_start_log(target, base).await? {
+                return Err(err.context(format!(
+                    "failed to start sshd under {}\nstart.log:\n{}",
+                    base, log
+                )));
+            }
+            return Err(err.context(format!("failed to start sshd under {}", base)));
+        }
+        Err(err) => return Err(err.context(format!("failed to start sshd under {}", base))),
+    };
 
     let port: u16 = output
         .trim()
         .parse()
         .with_context(|| format!("unexpected sshd port output: {}", output))?;
     Ok(port)
+}
+
+async fn read_start_log(target: &RemoteTarget, base: &str) -> Result<Option<String>> {
+    kubectl::exec_capture_optional_target(
+        target,
+        &["sh", "-c", &format!("tail -n 200 {}/logs/start.log", base)],
+    )
+    .await
 }
 
 const START_SSHD_SCRIPT: &str = r#"#!/bin/sh
