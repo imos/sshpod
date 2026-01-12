@@ -84,7 +84,7 @@ pub async fn ensure_sshd_running(
         Err(err) => {
             if let Some(log) = read_start_log(target, base).await? {
                 return Err(err.context(format!(
-                    "failed to start sshd under {}\nstart.log:\n{}",
+                    "failed to start sshd under {} (start.log below)\n{}",
                     base, log
                 )));
             }
