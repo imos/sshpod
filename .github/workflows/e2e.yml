@@ -89,7 +89,11 @@ jobs:
           set -euxo pipefail
           kubectl wait --for=condition=Ready node --all --timeout=180s
           POD_NAME="sshpod-e2e-${{ matrix.name }}"
-          kubectl run "$POD_NAME" --image="${{ matrix.image }}" --restart=Never --command -- sh -c "sleep 1000000000"
+          mem_args=()
+          if [ "${{ matrix.name }}" = "busybox" ]; then
+            mem_args=(--requests=memory=256Mi --limits=memory=512Mi)
+          fi
+          kubectl run "$POD_NAME" --image="${{ matrix.image }}" --restart=Never "${mem_args[@]}" --command -- sh -c "sleep 1000000000"
           kubectl wait --for=condition=Ready "pod/$POD_NAME" --timeout=180s
 
       - name: Verify ssh works through sshpod
