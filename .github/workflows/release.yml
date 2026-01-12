@@ -38,26 +38,21 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             arch_name: linux_amd64
             use_zigbuild: "false"
-            runner: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
             arch_name: linux_arm64
             use_zigbuild: "true"
-            runner: ubuntu-latest
           - target: aarch64-apple-darwin
             arch_name: darwin_arm64
-            use_zigbuild: "false"
-            runner: macos-latest
-          - target: x86_64-pc-windows-msvc
+            use_zigbuild: "true"
+          - target: x86_64-pc-windows-gnu
             arch_name: windows_amd64
-            use_zigbuild: "false"
-            runner: windows-latest
-          - target: aarch64-pc-windows-msvc
+            use_zigbuild: "true"
+          - target: aarch64-pc-windows-gnu
             arch_name: windows_arm64
-            use_zigbuild: "false"
-            runner: windows-latest
+            use_zigbuild: "true"
     env:
       VERSION: ${{ inputs.version }}
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -65,7 +60,6 @@ jobs:
           lfs: true
 
       - name: Set up Zig
-        if: ${{ matrix.use_zigbuild == 'true' }}
         uses: goto-bus-stop/setup-zig@v2
         with:
           version: "0.12.0"
@@ -76,8 +70,20 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install cargo-zigbuild
-        if: ${{ matrix.use_zigbuild == 'true' }}
         run: cargo install cargo-zigbuild
+
+      - name: Install macOS SDK (for apple-darwin)
+        if: contains(matrix.target, 'apple-darwin')
+        run: |
+          set -euxo pipefail
+          SDK_VERSION=11.3
+          SDK_FILE="MacOSX${SDK_VERSION}.sdk.tar.xz"
+          curl -L "https://github.com/phracker/MacOSX-SDKs/releases/download/${SDK_VERSION}/${SDK_FILE}" -o "${SDK_FILE}"
+          sudo mkdir -p /opt
+          sudo tar -C /opt -xf "${SDK_FILE}"
+          echo "SDKROOT=/opt/MacOSX${SDK_VERSION}.sdk" >> "$GITHUB_ENV"
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+          echo "ZIG_SYSTEM_LINKER_HACK=1" >> "$GITHUB_ENV"
 
       - name: Build release
         run: |
