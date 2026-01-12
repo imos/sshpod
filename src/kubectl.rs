@@ -600,7 +600,7 @@ pub async fn exec_with_input(
     let mut cmd = build_exec_command(context, namespace, pod, container, true);
     cmd.args(command);
     cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
+    cmd.stderr(Stdio::inherit());
     cmd.stdin(Stdio::piped());
 
     let mut child = cmd.spawn().context("failed to spawn kubectl exec")?;
@@ -618,11 +618,10 @@ pub async fn exec_with_input(
         .context("failed to wait for kubectl exec")?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         if let Some(err) = input_err {
-            bail!("kubectl exec failed (stdin error: {}): {}", err, stderr);
+            bail!("kubectl exec failed (stdin error: {})", err);
         } else {
-            bail!("kubectl exec failed: {}", stderr);
+            bail!("kubectl exec failed");
         }
     }
 
