@@ -7,7 +7,7 @@ use crate::port_forward::PortForward;
 use crate::proxy_io;
 use crate::remote;
 use anyhow::{bail, Context, Result};
-use log::{info, Level};
+use log::info;
 use std::io::Write;
 use tokio::net::TcpStream;
 
@@ -110,14 +110,8 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
         "[sshpod] starting port-forward to {}:{}",
         pod_name, remote_port
     );
-    let (mut forward, local_port) = PortForward::start(
-        context,
-        ns_str,
-        &pod_name,
-        remote_port,
-        log::log_enabled!(Level::Debug),
-    )
-    .await?;
+    let (mut forward, local_port) =
+        PortForward::start(context, ns_str, &pod_name, remote_port).await?;
     info!(
         "[sshpod] port-forward established: localhost:{} -> {}:{}",
         local_port, pod_name, remote_port
