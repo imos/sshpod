@@ -116,7 +116,7 @@ async fn read_start_log(target: &RemoteTarget, base: &str) -> Option<String> {
 }
 
 const START_SSHD_SCRIPT: &str = r#"#!/bin/sh
-set -eu
+set -eux
 
 BASE="$1"
 LOGIN_USER="$2"
