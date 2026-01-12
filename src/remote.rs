@@ -207,9 +207,6 @@ rand_port() {
 REMOTE_PATH="${PATH:-/usr/bin:/bin}"
 ENV_EXPORTS="$(env | awk -F= '/^KUBERNETES_/ {print $1}')"
 USER_HOME="$(get_home "$LOGIN_USER")"
-debug_log "paths ready user_home=${USER_HOME:-unknown} env_exports=${ENV_EXPORTS}"
-debug_log "sshd_size=$(stat -c%s "$SSHD" 2>/dev/null || wc -c < "$SSHD" 2>/dev/null || echo unknown)"
-debug_log "ps_snapshot=$(ps 2>/dev/null | tr '\n' '; ' || true)"
 
 i=0
 while [ $i -lt 30 ]; do
