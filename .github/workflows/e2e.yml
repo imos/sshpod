@@ -96,6 +96,7 @@ jobs:
         env:
           SSHPOD_BIN: /tmp/sshpod-bin/sshpod
           SSHPOD_DEBUG_SSHD: ${{ matrix.name == 'busybox' && '1' || '' }}
+          SSHPOD_DEBUG_SSHD_STDERR: ${{ matrix.name == 'busybox' && '1' || '' }}
         shell: bash
         run: |
           set -euxo pipefail
@@ -114,6 +115,9 @@ jobs:
             kubectl exec "$POD_NAME" -- sh -c "cat /tmp/sshpod/${POD_UID}/${POD_NAME}/logs/start.log 2>&1 || true"
             kubectl exec "$POD_NAME" -- sh -c "cat /tmp/sshpod/${POD_UID}/${POD_NAME}/logs/sshd.log 2>&1 || true"
             kubectl logs "$POD_NAME" || true
+            kubectl logs "$POD_NAME" --previous || true
+            kubectl describe pod "$POD_NAME" || true
+            kubectl get events --field-selector involvedObject.name="$POD_NAME" || true
             exit 1
           fi
 
@@ -124,5 +128,8 @@ jobs:
             kubectl exec "$POD_NAME" -- sh -c "cat /tmp/sshpod/${POD_UID}/${POD_NAME}/logs/start.log 2>&1 || true"
             kubectl exec "$POD_NAME" -- sh -c "cat /tmp/sshpod/${POD_UID}/${POD_NAME}/logs/sshd.log 2>&1 || true"
             kubectl logs "$POD_NAME" || true
+            kubectl logs "$POD_NAME" --previous || true
+            kubectl describe pod "$POD_NAME" || true
+            kubectl get events --field-selector involvedObject.name="$POD_NAME" || true
             exit 1
           fi

@@ -136,6 +136,11 @@ exec >"$BASE/logs/start.log" 2>&1
 if [ "${SSHPOD_DEBUG_SSHD:-}" = "1" ] || [ "${SSHPOD_DEBUG_SSHD:-}" = "true" ]; then
   set -x
 fi
+case "${SSHPOD_DEBUG_SSHD_STDERR:-}" in
+  1|true|TRUE|yes|YES|on|ON)
+    trap "cat \"$BASE/logs/start.log\" >&2 2>/dev/null || true" EXIT
+    ;;
+esac
 
 get_home() {
   if command -v getent >/dev/null 2>&1; then
