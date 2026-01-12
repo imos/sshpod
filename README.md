@@ -1,4 +1,4 @@
-[🌐 **English**] [[🇯🇵 Japanese](README.ja.md)]
+[🌐 English](README.md) | [🇯🇵 Japanese](README.ja.md)
 
 # sshpod
 
@@ -6,18 +6,26 @@
 
 ## Quick start
 
-### Automatic install
+### Automatic install (Linux/macOS)
 ```bash
 curl -fsSL https://raw.githubusercontent.com/imos/sshpod/main/install.sh | sh -s -- --yes
 ```
 Installs the latest release to `~/.local/bin` (override with `--prefix`) and runs `sshpod configure` without prompting when `--yes` is supplied.
 
+### Automatic install (Windows PowerShell)
+PowerShell 5+:
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force; `
+  iex "& { $(irm https://raw.githubusercontent.com/imos/sshpod/main/install.ps1) } -Yes"
+```
+Remove `-Yes` to be prompted before updating `~/.ssh/config`.
+
 ### Manual install
-1. Download the release asset for your OS/arch and place the `sshpod` binary on your PATH (for example `~/.local/bin/sshpod`).
+1. Download the release asset for your OS/arch (`.tar.gz` for Linux/macOS, `.zip` for Windows) and place the binary on your PATH (for example `~/.local/bin/sshpod` or `~/.local/bin/sshpod.exe`).
 2. Run `sshpod configure` (backs up `~/.ssh/config` and rewrites the sshpod block), or add the block below yourself—adjust the path if you installed elsewhere:
 ```sshconfig
 Host *.sshpod
-  ProxyCommand sshpod proxy --host %h --user %r --port %p
+  ProxyCommand ~/.local/bin/sshpod proxy --host %h --user %r --port %p
   StrictHostKeyChecking no
   UserKnownHostsFile /dev/null
   GlobalKnownHostsFile /dev/null
