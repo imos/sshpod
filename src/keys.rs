@@ -1,6 +1,7 @@
 use crate::paths;
 use anyhow::{Context, Result};
 use std::path::Path;
+use std::process::Stdio;
 use tokio::fs;
 use tokio::process::Command;
 
@@ -47,6 +48,7 @@ async fn ensure_ed25519_keys(private_key: &Path) -> Result<()> {
     if !private_key.exists() || !public_key.exists() {
         let status = Command::new("ssh-keygen")
             .args([
+                "-q",
                 "-t",
                 "ed25519",
                 "-f",
@@ -54,6 +56,8 @@ async fn ensure_ed25519_keys(private_key: &Path) -> Result<()> {
                 "-N",
                 "",
             ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .status()
             .await
             .context("failed to spawn ssh-keygen")?;
