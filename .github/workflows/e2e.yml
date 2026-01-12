@@ -40,8 +40,6 @@ jobs:
             image: ubuntu:22.04
           - name: alpine
             image: alpine:3.19
-          - name: busybox
-            image: busybox:1.36
           - name: python
             image: python:3.12-slim
     runs-on: ubuntu-latest
