@@ -15,7 +15,7 @@ curl -fsSL https://raw.githubusercontent.com/imos/sshpod/main/install.sh | sh -s
 PowerShell 5+:
 ```powershell
 Set-ExecutionPolicy Bypass -Scope Process -Force; `
-  iex "& { $(irm https://raw.githubusercontent.com/imos/sshpod/main/install.ps1) } -Yes"
+  & ([scriptblock]::create((irm https://raw.githubusercontent.com/imos/sshpod/main/install.ps1))) -Yes
 ```
 `-Yes` を外すと `~/.ssh/config` 更新前に確認します。
 
