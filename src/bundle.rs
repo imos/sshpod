@@ -1,4 +1,5 @@
-use crate::{embedded, kubectl};
+use crate::embedded;
+use crate::kubectl::{self, RemoteTarget};
 use anyhow::{anyhow, bail, Context, Result};
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -12,13 +13,8 @@ use xz2::read::XzDecoder;
 
 pub const BUNDLE_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "+sshd1");
 
-pub async fn detect_remote_arch(
-    context: Option<&str>,
-    namespace: &str,
-    pod: &str,
-    container: &str,
-) -> Result<String> {
-    let machine = kubectl::exec_capture(context, namespace, pod, container, &["uname", "-m"])
+pub async fn detect_remote_arch(target: &RemoteTarget) -> Result<String> {
+    let machine = kubectl::exec_capture_target(target, &["uname", "-m"])
         .await
         .context("failed to detect remote arch via uname -m")?;
     let arch = match machine.trim() {
@@ -31,22 +27,12 @@ pub async fn detect_remote_arch(
     Ok(arch.to_string())
 }
 
-pub async fn ensure_bundle(
-    context: Option<&str>,
-    namespace: &str,
-    pod: &str,
-    container: &str,
-    base: &str,
-    arch: &str,
-) -> Result<()> {
+pub async fn ensure_bundle(target: &RemoteTarget, base: &str, arch: &str) -> Result<()> {
     let version_path = format!("{}/bundle/VERSION", base);
     let arch_path = format!("{}/bundle/ARCH", base);
     let remote_version =
-        kubectl::exec_capture_optional(context, namespace, pod, container, &["cat", &version_path])
-            .await?;
-    let remote_arch =
-        kubectl::exec_capture_optional(context, namespace, pod, container, &["cat", &arch_path])
-            .await?;
+        kubectl::exec_capture_optional_target(target, &["cat", &version_path]).await?;
+    let remote_arch = kubectl::exec_capture_optional_target(target, &["cat", &arch_path]).await?;
 
     info!(
         "[sshpod] checking bundle (remote version={:?}, remote arch={:?}, expected version={}, expected arch={})",
@@ -79,31 +65,14 @@ pub async fn ensure_bundle(
     );
     let mut sshd_data: Option<Vec<u8>> = None;
 
-    let xz_result = try_install_xz(
-        context,
-        namespace,
-        pod,
-        container,
-        &bundle_data,
-        &install_xz,
-    )
-    .await;
+    let xz_result = try_install_xz(target, &bundle_data, &install_xz).await;
     if xz_result.is_ok() {
         info!("[sshpod] bundle install completed");
         return Ok(());
     }
     let xz_err = xz_result.err().unwrap();
 
-    let gzip_result = try_install_gzip(
-        context,
-        namespace,
-        pod,
-        container,
-        &bundle_data,
-        &install_gz,
-        &mut sshd_data,
-    )
-    .await;
+    let gzip_result = try_install_gzip(target, &bundle_data, &install_gz, &mut sshd_data).await;
     if gzip_result.is_ok() {
         info!("[sshpod] bundle install completed");
         return Ok(());
@@ -112,22 +81,14 @@ pub async fn ensure_bundle(
 
     let sshd_data = ensure_plain_data(&bundle_data, &mut sshd_data)
         .context("failed to prepare sshd payload for plain install")?;
-    install_bundle_with_command(
-        context,
-        namespace,
-        pod,
-        container,
-        &install_plain,
-        sshd_data,
-        "plain",
-    )
-    .await
-    .with_context(|| {
-        format!(
-            "failed to install bundle into {} (xz: {}; gzip: {})",
-            base, xz_err, gzip_err
-        )
-    })?;
+    install_bundle_with_command(target, &install_plain, sshd_data, "plain")
+        .await
+        .with_context(|| {
+            format!(
+                "failed to install bundle into {} (xz: {}; gzip: {})",
+                base, xz_err, gzip_err
+            )
+        })?;
 
     info!("[sshpod] bundle install completed");
     Ok(())
@@ -147,18 +108,9 @@ async fn load_bundle_data(arch: &str) -> Result<Cow<'static, [u8]>> {
     }
 }
 
-async fn tool_available(
-    context: Option<&str>,
-    namespace: &str,
-    pod: &str,
-    container: &str,
-    tool: &str,
-) -> Result<bool> {
-    Ok(kubectl::exec_capture_optional(
-        context,
-        namespace,
-        pod,
-        container,
+async fn tool_available(target: &RemoteTarget, tool: &str) -> Result<bool> {
+    Ok(kubectl::exec_capture_optional_target(
+        target,
         &["sh", "-c", &format!("command -v {}", tool)],
     )
     .await?
@@ -182,75 +134,40 @@ fn gzip_payload(data: &[u8]) -> Result<Vec<u8>> {
 }
 
 async fn try_install_xz(
-    context: Option<&str>,
-    namespace: &str,
-    pod: &str,
-    container: &str,
+    target: &RemoteTarget,
     bundle_data: &[u8],
     install_cmd: &str,
 ) -> Result<()> {
-    if !tool_available(context, namespace, pod, container, "xz").await? {
+    if !tool_available(target, "xz").await? {
         info!("[sshpod] skipping xz install (xz not available)");
         return Err(anyhow!("xz not available in container"));
     }
-    install_bundle_with_command(
-        context,
-        namespace,
-        pod,
-        container,
-        install_cmd,
-        bundle_data,
-        "xz",
-    )
-    .await
+    install_bundle_with_command(target, install_cmd, bundle_data, "xz").await
 }
 
 async fn try_install_gzip(
-    context: Option<&str>,
-    namespace: &str,
-    pod: &str,
-    container: &str,
+    target: &RemoteTarget,
     bundle_data: &[u8],
     install_cmd: &str,
     sshd_cache: &mut Option<Vec<u8>>,
 ) -> Result<()> {
-    if !tool_available(context, namespace, pod, container, "gzip").await? {
+    if !tool_available(target, "gzip").await? {
         info!("[sshpod] skipping gzip install (gzip not available)");
         return Err(anyhow!("gzip not available in container"));
     }
     let sshd_data_ref = ensure_plain_data(bundle_data, sshd_cache)?;
     let gz_data = gzip_payload(sshd_data_ref)?;
-    install_bundle_with_command(
-        context,
-        namespace,
-        pod,
-        container,
-        install_cmd,
-        &gz_data,
-        "gzip",
-    )
-    .await
+    install_bundle_with_command(target, install_cmd, &gz_data, "gzip").await
 }
 
 async fn install_bundle_with_command(
-    context: Option<&str>,
-    namespace: &str,
-    pod: &str,
-    container: &str,
+    target: &RemoteTarget,
     install_cmd: &str,
     payload: &[u8],
     label: &str,
 ) -> Result<()> {
     info!("[sshpod] installing bundle via {}", label);
-    kubectl::exec_with_input(
-        context,
-        namespace,
-        pod,
-        container,
-        &["sh", "-c", install_cmd],
-        payload,
-    )
-    .await?;
+    kubectl::exec_with_input_target(target, &["sh", "-c", install_cmd], payload).await?;
     Ok(())
 }
 

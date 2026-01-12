@@ -2,7 +2,7 @@ use crate::bundle;
 use crate::cli::ProxyArgs;
 use crate::hostspec::{self, Target};
 use crate::keys;
-use crate::kubectl;
+use crate::kubectl::{self, RemoteTarget};
 use crate::port_forward::PortForward;
 use crate::proxy_io;
 use crate::remote;
@@ -75,6 +75,12 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
     info!("[sshpod] resolved container: {}", container);
 
     let base = format!("/tmp/sshpod/{}/{}", pod_info.uid, container);
+    let target = RemoteTarget {
+        context: Some(host.context.clone()),
+        namespace: namespace.clone(),
+        pod: pod_name.clone(),
+        container: container.clone(),
+    };
 
     let local_key = keys::ensure_key("id_ed25519")
         .await
@@ -86,11 +92,11 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
     remote::try_acquire_lock(context, ns_str, &pod_name, &container, &base).await;
     remote::assert_login_user_allowed(context, ns_str, &pod_name, &container, &login_user).await?;
 
-    let arch = bundle::detect_remote_arch(context, ns_str, &pod_name, &container)
+    let arch = bundle::detect_remote_arch(&target)
         .await
         .context("failed to detect remote arch")?;
     info!("[sshpod] remote architecture: {}", arch);
-    bundle::ensure_bundle(context, ns_str, &pod_name, &container, &base, &arch).await?;
+    bundle::ensure_bundle(&target, &base, &arch).await?;
     info!("[sshpod] sshd bundle ready for pod {}", pod_name);
     remote::install_host_keys(context, ns_str, &pod_name, &container, &base, &host_keys).await?;
 
