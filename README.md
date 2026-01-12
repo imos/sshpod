@@ -16,7 +16,7 @@ Installs the latest release to `~/.local/bin` (override with `--prefix`) and run
 PowerShell 5+:
 ```powershell
 Set-ExecutionPolicy Bypass -Scope Process -Force; `
-  iex "& { $(irm https://raw.githubusercontent.com/imos/sshpod/main/install.ps1) } -Yes"
+  & ([scriptblock]::create((irm https://raw.githubusercontent.com/imos/sshpod/main/install.ps1))) -Yes
 ```
 Remove `-Yes` to be prompted before updating `~/.ssh/config`.
 

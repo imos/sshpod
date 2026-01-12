@@ -54,9 +54,9 @@ function Get-Version([string]$Value) {
     if ($env:GITHUB_TOKEN) {
         $headers["Authorization"] = "Bearer $($env:GITHUB_TOKEN)"
     }
-    $version = ""
     $apiUrl = "https://api.github.com/repos/imos/sshpod/releases/latest"
     $webUrl = "https://github.com/imos/sshpod/releases/latest"
+    $version = ""
 
     function Try-Api {
         param($Headers, $Url)
@@ -73,26 +73,23 @@ function Get-Version([string]$Value) {
         return ($uri -replace '.*/tag/v?([^/]+)$','$1')
     }
 
-    foreach ($attempt in 1..5) {
+    try {
+        $version = Try-Api -Headers $headers -Url $apiUrl
+    }
+    catch {
+        $version = ""
+    }
+    if ([string]::IsNullOrWhiteSpace($version)) {
         try {
-            $version = Try-Api -Headers $headers -Url $apiUrl
+            $version = Try-Redirect -Headers $headers -Url $webUrl
         }
         catch {
             $version = ""
         }
-        if ([string]::IsNullOrWhiteSpace($version)) {
-            try {
-                $version = Try-Redirect -Headers $headers -Url $webUrl
-            }
-            catch {
-                $version = ""
-            }
-        }
-        if (-not [string]::IsNullOrWhiteSpace($version)) { break }
-        Start-Sleep -Seconds $attempt
     }
+
     if ([string]::IsNullOrWhiteSpace($version)) {
-        throw "Failed to determine latest version from GitHub releases after retries."
+        throw "Failed to determine latest version from GitHub releases."
     }
     return $version
 }

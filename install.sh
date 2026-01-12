@@ -60,21 +60,16 @@ fetch_latest_version() {
       | sed -E 's#.*/tag/v?([^/]+)$#\1#'
   }
 
-  attempt=1
-  while [ "$attempt" -le 5 ]; do
-    version="$(try_api)"
-    if [ -z "$version" ]; then
-      version="$(try_redirect)"
-    fi
-    if [ -n "$version" ]; then
-      echo "$version"
-      return 0
-    fi
-    sleep "$attempt"
-    attempt=$((attempt + 1))
-  done
+  version="$(try_api)"
+  if [ -z "$version" ]; then
+    version="$(try_redirect)"
+  fi
+  if [ -n "$version" ]; then
+    echo "$version"
+    return 0
+  fi
 
-  echo "Failed to determine latest version from GitHub releases after retries." >&2
+  echo "Failed to determine latest version from GitHub releases." >&2
   exit 1
 }
 
