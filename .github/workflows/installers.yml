@@ -6,9 +6,6 @@ on:
       - main
   pull_request:
 
-env:
-  CI_VERSION: ci
-
 jobs:
   unix-installers:
     name: Unix installers
@@ -19,42 +16,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Ensure installer executable
+        run: chmod +x install.sh
 
-      - name: Build release binary
-        run: cargo build --release
-
-      - name: Package release asset
-        run: |
-          set -euo pipefail
-          OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-          case "$(uname -m)" in
-            x86_64|amd64) ARCH="amd64" ;;
-            aarch64|arm64) ARCH="arm64" ;;
-            *) echo "Unsupported arch: $(uname -m)" >&2; exit 1 ;;
-          esac
-          ASSET="sshpod_${CI_VERSION}_${OS}_${ARCH}.tar.gz"
-          mkdir -p "dist/v${CI_VERSION}"
-          tar czf "dist/v${CI_VERSION}/${ASSET}" -C target/release sshpod
-
-      - name: Run installer script
+      - name: Run installer script (latest release)
         env:
-          HOME: ${{ github.workspace }}/home
-          SSHPOD_BASE_URL: file://${{ github.workspace }}/dist
+          HOME: ${{ runner.temp }}/sshpod-home
         run: |
           set -euo pipefail
           mkdir -p "$HOME"
-          ./install.sh --version "${CI_VERSION}" --yes --prefix "${PWD}/out/bin"
+          ./install.sh --yes
 
       - name: Verify install
         env:
-          HOME: ${{ github.workspace }}/home
+          HOME: ${{ runner.temp }}/sshpod-home
         run: |
           set -euo pipefail
-          test -x "${PWD}/out/bin/sshpod"
-          "${PWD}/out/bin/sshpod" --version
-          grep -F "Host *.sshpod" "${HOME}/.ssh/config"
+          test -x "$HOME/.local/bin/sshpod"
+          "$HOME/.local/bin/sshpod" --version
+          grep -F "Host *.sshpod" "$HOME/.ssh/config"
 
   windows-installer:
     name: Windows installer
@@ -62,50 +42,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build release binary
-        shell: pwsh
-        run: cargo build --release
-
-      - name: Package release asset
+      - name: Run installer script (latest release)
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $version = "${env:CI_VERSION}"
-          $arch = switch ($env:PROCESSOR_ARCHITECTURE.ToLower()) {
-            "amd64" { "amd64" }
-            "arm64" { "arm64" }
-            default { throw "Unsupported arch: $($env:PROCESSOR_ARCHITECTURE)" }
-          }
-          $distRoot = Join-Path $env:GITHUB_WORKSPACE "dist"
-          $dist = Join-Path $distRoot "v$version"
-          New-Item -ItemType Directory -Path $dist -Force | Out-Null
-          $asset = "sshpod_${version}_windows_${arch}.zip"
-          $dest = Join-Path $dist $asset
-          Compress-Archive -Path "target/release/sshpod.exe" -DestinationPath $dest -Force
-
-      - name: Run installer script
-        shell: pwsh
-        env:
-          CI_VERSION: ${{ env.CI_VERSION }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          $home = Join-Path $env:GITHUB_WORKSPACE "home"
+          $home = Join-Path $env:RUNNER_TEMP "sshpod-home"
           New-Item -ItemType Directory -Path $home -Force | Out-Null
           $env:USERPROFILE = $home
-          $prefix = Join-Path $env:GITHUB_WORKSPACE "out\bin"
-          $base = "file:///" + ((Join-Path $env:GITHUB_WORKSPACE "dist") -replace '\\','/')
-          ./install.ps1 -Version $env:CI_VERSION -Yes -Prefix $prefix -BaseUrl $base
+          ./install.ps1 -Yes
 
       - name: Verify install
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $bin = Join-Path $env:GITHUB_WORKSPACE "out\bin\sshpod.exe"
+          $home = Join-Path $env:RUNNER_TEMP "sshpod-home"
+          $bin = Join-Path $home ".local\bin\sshpod.exe"
           if (-not (Test-Path $bin)) { throw "sshpod.exe missing" }
           & $bin --version
-          $config = Join-Path $env:GITHUB_WORKSPACE "home\.ssh\config"
+          $config = Join-Path $home ".ssh\config"
           if (-not (Test-Path $config)) { throw "config not found" }
           if (-not (Select-String -Path $config -SimpleMatch "Host *.sshpod")) { throw "ssh config block missing" }
