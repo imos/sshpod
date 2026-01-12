@@ -23,15 +23,15 @@ jobs:
         env:
           HOME: ${{ runner.temp }}/sshpod-home
         run: |
-          set -euo pipefail
+          set -eux
           mkdir -p "$HOME"
-          ./install.sh --yes
+          sh -x ./install.sh --yes
 
       - name: Verify install
         env:
           HOME: ${{ runner.temp }}/sshpod-home
         run: |
-          set -euo pipefail
+          set -eux
           test -x "$HOME/.local/bin/sshpod"
           "$HOME/.local/bin/sshpod" --version
           grep -F "Host *.sshpod" "$HOME/.ssh/config"
