@@ -89,71 +89,16 @@ jobs:
           set -euxo pipefail
           kubectl wait --for=condition=Ready node --all --timeout=180s
           POD_NAME="sshpod-e2e-${{ matrix.name }}"
-          if [ "${{ matrix.name }}" = "busybox" ]; then
-            cat <<'EOF' | kubectl apply -f -
-          apiVersion: v1
-          kind: Pod
-          metadata:
-            name: sshpod-e2e-busybox
-          spec:
-            restartPolicy: Never
-            containers:
-              - name: busybox
-                image: busybox:1.36
-                command: ["sh", "-c", "sleep 1000000000"]
-                resources:
-                  requests:
-                    memory: 512Mi
-                  limits:
-                    memory: 1024Mi
-          EOF
-          else
-            kubectl run "$POD_NAME" --image="${{ matrix.image }}" --restart=Never --command -- sh -c "sleep 1000000000"
-          fi
+          kubectl run "$POD_NAME" --image="${{ matrix.image }}" --restart=Never --command -- sh -c "sleep 1000000000"
           kubectl wait --for=condition=Ready "pod/$POD_NAME" --timeout=180s
 
       - name: Verify ssh works through sshpod
         env:
           SSHPOD_BIN: /tmp/sshpod-bin/sshpod
-          SSHPOD_DEBUG_SSHD: ${{ matrix.name == 'busybox' && '1' || '' }}
-          SSHPOD_DEBUG_SSHD_STDERR: ${{ matrix.name == 'busybox' && '1' || '' }}
         shell: bash
         run: |
-          set -euxo pipefail
+          set -eux
           POD_NAME="sshpod-e2e-${{ matrix.name }}"
           KUBE_CONTEXT="$(kubectl config current-context)"
-          set +o pipefail
           ssh "root@pod--${POD_NAME}.namespace--default.context--${KUBE_CONTEXT}.sshpod" -- echo 'ssh-ok' | tee /tmp/ssh_output
-          ssh_status=${PIPESTATUS[0]}
-          set -o pipefail
-
-          POD_UID="$(kubectl get pod "$POD_NAME" -o jsonpath='{.metadata.uid}')"
-
-          if [ "$ssh_status" -ne 0 ]; then
-            echo "ssh command failed (status $ssh_status), fetching logs..."
-            set +e
-            kubectl exec "$POD_NAME" -- sh -c "ls -l /tmp/sshpod/${POD_UID}/${POD_NAME}/logs" || true
-            kubectl exec "$POD_NAME" -- sh -c "cat /tmp/sshpod/${POD_UID}/${POD_NAME}/logs/start.log 2>&1" || true
-            kubectl exec "$POD_NAME" -- sh -c "cat /tmp/sshpod/${POD_UID}/${POD_NAME}/logs/sshd.log 2>&1" || true
-            kubectl logs "$POD_NAME" || true
-            kubectl logs "$POD_NAME" --previous || true
-            kubectl describe pod "$POD_NAME" || true
-            kubectl get events --field-selector involvedObject.name="$POD_NAME" || true
-            kubectl get pod "$POD_NAME" -o yaml || true
-            exit 1
-          fi
-
-          if ! grep -qx 'ssh-ok' /tmp/ssh_output; then
-            echo "unexpected ssh output:"
-            cat /tmp/ssh_output
-            set +e
-            kubectl exec "$POD_NAME" -- sh -c "ls -l /tmp/sshpod/${POD_UID}/${POD_NAME}/logs" || true
-            kubectl exec "$POD_NAME" -- sh -c "cat /tmp/sshpod/${POD_UID}/${POD_NAME}/logs/start.log 2>&1" || true
-            kubectl exec "$POD_NAME" -- sh -c "cat /tmp/sshpod/${POD_UID}/${POD_NAME}/logs/sshd.log 2>&1" || true
-            kubectl logs "$POD_NAME" || true
-            kubectl logs "$POD_NAME" --previous || true
-            kubectl describe pod "$POD_NAME" || true
-            kubectl get events --field-selector involvedObject.name="$POD_NAME" || true
-            kubectl get pod "$POD_NAME" -o yaml || true
-            exit 1
-          fi
+          grep 'ssh-ok' /tmp/ssh_output

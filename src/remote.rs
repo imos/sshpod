@@ -139,9 +139,6 @@ TOP_DIR="$(dirname "$BASE_PARENT")"
 chmod 711 "$TOP_DIR" "$BASE_PARENT"
 touch "$BASE/logs/start.log" || true
 debug_log "start script begin (base=$BASE user=$LOGIN_USER)"
-debug_log "uname=$(uname -a 2>/dev/null || true)"
-debug_log "meminfo=$(head -n 5 /proc/meminfo 2>/dev/null | tr '\n' '; ' || true)"
-debug_log "limits=$(ulimit -a 2>/dev/null | tr '\n' '; ' || true)"
 
 dump_and_exit() {
   if [ -f "$BASE/logs/start.log" ]; then
