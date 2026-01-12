@@ -1,40 +1,21 @@
 use crate::keys::Key;
-use crate::kubectl;
+use crate::kubectl::{self, RemoteTarget};
 use anyhow::{bail, Context, Result};
 use tokio::time::{timeout, Duration};
 
-pub async fn try_acquire_lock(
-    context: Option<&str>,
-    namespace: &str,
-    pod: &str,
-    container: &str,
-    base: &str,
-) {
+pub async fn try_acquire_lock(target: &RemoteTarget, base: &str) {
     let lock_cmd = format!("umask 077; mkdir \"{}/lock\"", base);
-    let _ = kubectl::exec_capture_optional(
-        context,
-        namespace,
-        pod,
-        container,
-        &["sh", "-c", &lock_cmd],
-    )
-    .await;
+    let _ = kubectl::exec_capture_optional_target(target, &["sh", "-c", &lock_cmd]).await;
 }
 
-pub async fn assert_login_user_allowed(
-    context: Option<&str>,
-    namespace: &str,
-    pod: &str,
-    container: &str,
-    login_user: &str,
-) -> Result<()> {
-    let uid = kubectl::exec_capture(context, namespace, pod, container, &["id", "-u"])
+pub async fn assert_login_user_allowed(target: &RemoteTarget, login_user: &str) -> Result<()> {
+    let uid = kubectl::exec_capture_target(target, &["id", "-u"])
         .await
         .context("failed to read remote uid")?;
     if uid.trim() == "0" {
         return Ok(());
     }
-    let remote_user = kubectl::exec_capture(context, namespace, pod, container, &["id", "-un"])
+    let remote_user = kubectl::exec_capture_target(target, &["id", "-un"])
         .await
         .context("failed to read remote user")?;
     if remote_user.trim() != login_user {
@@ -47,14 +28,7 @@ pub async fn assert_login_user_allowed(
     Ok(())
 }
 
-pub async fn install_host_keys(
-    context: Option<&str>,
-    namespace: &str,
-    pod: &str,
-    container: &str,
-    base: &str,
-    host_keys: &Key,
-) -> Result<()> {
+pub async fn install_host_keys(target: &RemoteTarget, base: &str, host_keys: &Key) -> Result<()> {
     let private = &host_keys.private;
     let public = &host_keys.public;
     let script = format!(
@@ -82,24 +56,14 @@ mv "$TMP_PUB" "$PUB"
 chmod 600 "$PRIV" "$PUB"
 "#
     );
-    kubectl::exec_with_input(
-        context,
-        namespace,
-        pod,
-        container,
-        &["sh", "-s"],
-        script.as_bytes(),
-    )
-    .await
-    .with_context(|| format!("failed to install host keys into {}", base))?;
+    kubectl::exec_with_input_target(target, &["sh", "-s"], script.as_bytes())
+        .await
+        .with_context(|| format!("failed to install host keys into {}", base))?;
     Ok(())
 }
 
 pub async fn ensure_sshd_running(
-    context: Option<&str>,
-    namespace: &str,
-    pod: &str,
-    container: &str,
+    target: &RemoteTarget,
     base: &str,
     login_user: &str,
     pubkey_line: &str,
@@ -107,11 +71,8 @@ pub async fn ensure_sshd_running(
     let script = START_SSHD_SCRIPT.as_bytes();
     let output = timeout(
         Duration::from_secs(40),
-        kubectl::exec_with_input(
-            context,
-            namespace,
-            pod,
-            container,
+        kubectl::exec_with_input_target(
+            target,
             &["sh", "-s", "--", base, login_user, pubkey_line],
             script,
         ),

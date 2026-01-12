@@ -2,9 +2,9 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostSpec {
-    pub target: Target,
+    pub context: Option<String>,
     pub namespace: Option<String>,
-    pub context: String,
+    pub target: Target,
     pub container: Option<String>,
 }
 
@@ -20,7 +20,7 @@ pub enum HostSpecError {
     #[error("hostname must end with .sshpod")]
     MissingSuffix,
     #[error(
-        "hostname must include context--<context> and one of pod--/deployment--/job-- (container-- optional, namespace-- optional), ending with .sshpod"
+        "hostname must include one of pod--/deployment--/job-- (container-- optional, namespace-- optional, context-- optional), ending with .sshpod"
     )]
     InvalidFormat,
 }
@@ -65,7 +65,6 @@ pub fn parse(host: &str) -> Result<HostSpec, HostSpecError> {
         return Err(HostSpecError::InvalidFormat);
     }
 
-    let context = context.ok_or(HostSpecError::InvalidFormat)?;
     let target = target.ok_or(HostSpecError::InvalidFormat)?;
 
     Ok(HostSpec {
@@ -111,7 +110,7 @@ mod tests {
             parse("pod--app.namespace--ns.context--ctx.sshpod").expect("should parse successfully");
         assert_eq!(spec.target, Target::Pod("app".into()));
         assert_eq!(spec.namespace.as_deref(), Some("ns"));
-        assert_eq!(spec.context, "ctx");
+        assert_eq!(spec.context.as_deref(), Some("ctx"));
         assert!(spec.container.is_none());
     }
 
@@ -120,7 +119,7 @@ mod tests {
         let spec = parse("pod--app.context--ctx.sshpod").expect("should parse successfully");
         assert_eq!(spec.target, Target::Pod("app".into()));
         assert!(spec.namespace.is_none());
-        assert_eq!(spec.context, "ctx");
+        assert_eq!(spec.context.as_deref(), Some("ctx"));
     }
 
     #[test]
@@ -130,7 +129,7 @@ mod tests {
         assert_eq!(spec.target, Target::Deployment("api".into()));
         assert_eq!(spec.container.as_deref(), Some("web"));
         assert_eq!(spec.namespace.as_deref(), Some("ns"));
-        assert_eq!(spec.context, "ctx");
+        assert_eq!(spec.context.as_deref(), Some("ctx"));
     }
 
     #[test]
