@@ -60,6 +60,14 @@ jobs:
       - name: Make binary executable
         run: chmod +x /tmp/sshpod-bin/sshpod
 
+      - name: Install sshpod for configure
+        run: |
+          mkdir -p ~/.local/bin
+          cp /tmp/sshpod-bin/sshpod ~/.local/bin/sshpod
+
+      - name: Configure sshpod
+        run: ~/.local/bin/sshpod configure
+
       - name: Write kind config
         run: |
           cat >/tmp/kind-config.yaml <<'EOF'
@@ -92,22 +100,11 @@ jobs:
           set -euxo pipefail
           POD_NAME="sshpod-e2e-${{ matrix.name }}"
           KUBE_CONTEXT="$(kubectl config current-context)"
-          cat >/tmp/sshpod_config <<EOF
-          Host *.sshpod
-            ProxyCommand ${SSHPOD_BIN} proxy --host %h --user %r --port %p --log-level info
-            StrictHostKeyChecking no
-            UserKnownHostsFile /dev/null
-            GlobalKnownHostsFile /dev/null
-            CheckHostIP no
-            IdentityFile ~/.cache/sshpod/id_ed25519
-            IdentitiesOnly yes
-            BatchMode yes
-          EOF
 
           REMOTE_SCRIPT=$'set -eu\npwd\nid\ntouch /tmp/sshpod-e2e-marker\nls -l /tmp/sshpod-e2e-marker\nyes ssh-ok | head -n 500'
           SSH_LOG=/tmp/ssh_output
 
-          ssh -v -F /tmp/sshpod_config "root@pod--${POD_NAME}.namespace--default.context--${KUBE_CONTEXT}.sshpod" -- /bin/sh -lc "$REMOTE_SCRIPT" >"$SSH_LOG" 2>&1
+          ssh -v -F "$HOME/.ssh/config" "root@pod--${POD_NAME}.namespace--default.context--${KUBE_CONTEXT}.sshpod" -- /bin/sh -lc "$REMOTE_SCRIPT" >"$SSH_LOG" 2>&1
 
           ok_lines="$(grep -c '^ssh-ok$' "$SSH_LOG" || true)"
           echo "ssh-ok lines: ${ok_lines}"

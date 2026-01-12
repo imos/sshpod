@@ -22,7 +22,10 @@ pub async fn pump(stream: TcpStream) -> Result<()> {
     let (a, b) = tokio::join!(to_remote, from_remote);
     let to_bytes = a??;
     let from_bytes = b??;
-    // Log to stderr to avoid polluting SSH transport; only emit on failures upstream
-    eprintln!("[sshpod][proxy_io] bytes_to_remote={} bytes_from_remote={}", to_bytes, from_bytes);
+    // Debug logging kept compact
+    eprintln!(
+        "[sshpod][proxy_io] bytes_to_remote={} bytes_from_remote={}",
+        to_bytes, from_bytes
+    );
     Ok(())
 }
