@@ -284,7 +284,7 @@ EOF
   chmod 600 "$BASE/sshd_config"
   rm -f "$BASE/sshd.pid"
   debug_log "launching sshd on $PORT"
-  "$SSHD" -f "$BASE/sshd_config" -E "$BASE/logs/sshd.log" </dev/null >/dev/null 2>&1 || true
+  "$SSHD" -f "$BASE/sshd_config" -E "$BASE/logs/sshd.log" </dev/null >&4 2>&4 || true
   j=0
   while [ $j -lt 10 ]; do
     if [ -f "$BASE/sshd.pid" ] && kill -0 "$(cat "$BASE/sshd.pid")" 2>/dev/null; then
