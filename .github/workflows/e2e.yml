@@ -86,16 +86,16 @@ jobs:
           POD_NAME="sshpod-e2e-${{ matrix.name }}"
           KUBE_CONTEXT="$(kubectl config current-context)"
           cat >/tmp/sshpod_config <<EOF
-Host *.sshpod
-  ProxyCommand ${SSHPOD_BIN} proxy --host %h --user %r --port %p --log-level info
-  StrictHostKeyChecking no
-  UserKnownHostsFile /dev/null
-  GlobalKnownHostsFile /dev/null
-  CheckHostIP no
-  IdentityFile ~/.cache/sshpod/id_ed25519
-  IdentitiesOnly yes
-  BatchMode yes
-EOF
+          Host *.sshpod
+            ProxyCommand ${SSHPOD_BIN} proxy --host %h --user %r --port %p --log-level info
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+            GlobalKnownHostsFile /dev/null
+            CheckHostIP no
+            IdentityFile ~/.cache/sshpod/id_ed25519
+            IdentitiesOnly yes
+            BatchMode yes
+          EOF
 
           ssh -F /tmp/sshpod_config "root@pod--${POD_NAME}.namespace--default.context--${KUBE_CONTEXT}.sshpod" -- printf 'ssh-ok\n' > /tmp/ssh_output
           grep -qx 'ssh-ok' /tmp/ssh_output
