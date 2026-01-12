@@ -139,6 +139,9 @@ TOP_DIR="$(dirname "$BASE_PARENT")"
 chmod 711 "$TOP_DIR" "$BASE_PARENT"
 touch "$BASE/logs/start.log" || true
 debug_log "start script begin (base=$BASE user=$LOGIN_USER)"
+debug_log "uname=$(uname -a 2>/dev/null || true)"
+debug_log "meminfo=$(head -n 5 /proc/meminfo 2>/dev/null | tr '\n' '; ' || true)"
+debug_log "limits=$(ulimit -a 2>/dev/null | tr '\n' '; ' || true)"
 
 dump_and_exit() {
   if [ -f "$BASE/logs/start.log" ]; then
@@ -184,6 +187,7 @@ if ! have_user sshd; then
     adduser -D -H -s /sbin/nologin -h /tmp/empty sshd >/dev/null 2>&1 || true
   fi
 fi
+debug_log "sshd user ensured"
 
 if [ ! -f "$BASE/hostkeys/ssh_host_ed25519_key" ]; then
   echo "host key missing at $BASE/hostkeys/ssh_host_ed25519_key" >&2
@@ -207,6 +211,8 @@ REMOTE_PATH="${PATH:-/usr/bin:/bin}"
 ENV_EXPORTS="$(env | awk -F= '/^KUBERNETES_/ {print $1}')"
 USER_HOME="$(get_home "$LOGIN_USER")"
 debug_log "paths ready user_home=${USER_HOME:-unknown} env_exports=${ENV_EXPORTS}"
+debug_log "sshd_size=$(stat -c%s "$SSHD" 2>/dev/null || wc -c < "$SSHD" 2>/dev/null || echo unknown)"
+debug_log "ps_snapshot=$(ps 2>/dev/null | tr '\n' '; ' || true)"
 
 i=0
 while [ $i -lt 30 ]; do
