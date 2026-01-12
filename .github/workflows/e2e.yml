@@ -8,7 +8,7 @@ on:
       - main
 
 jobs:
-  e2e:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -22,10 +22,46 @@ jobs:
       - name: Build sshpod
         run: cargo build --release --locked
 
+      - name: Upload sshpod binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: sshpod-linux
+          path: target/release/sshpod
+
+  e2e:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu
+            image: ubuntu:22.04
+          - name: alpine
+            image: alpine:3.19
+          - name: busybox
+            image: busybox:1.36
+          - name: python
+            image: python:3.12-slim
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download sshpod binary
+        uses: actions/download-artifact@v4
+        with:
+          name: sshpod-linux
+          path: /tmp/sshpod-bin
+
+      - name: Make binary executable
+        run: chmod +x /tmp/sshpod-bin/sshpod
+
       - name: Create kind cluster
         uses: helm/kind-action@v1
         with:
-          cluster_name: sshpod-e2e
+          cluster_name: sshpod-e2e-${{ matrix.name }}
           config: |
             kind: Cluster
             apiVersion: kind.x-k8s.io/v1alpha4
@@ -36,17 +72,20 @@ jobs:
       - name: Launch test pod
         run: |
           set -euxo pipefail
-          kubectl wait --for=condition=Ready nodes --all --timeout=180s
-          kubectl run sshpod-e2e --image=ubuntu:22.04 --restart=Never --command -- sleep infinity
-          kubectl wait --for=condition=Ready pod/sshpod-e2e --timeout=120s
+          kubectl wait --for=condition=Ready node --all --timeout=180s
+          POD_NAME="sshpod-e2e-${{ matrix.name }}"
+          kubectl run "$POD_NAME" --image="${{ matrix.image }}" --restart=Never --command -- sh -c "sleep 1000000000"
+          kubectl wait --for=condition=Ready "pod/$POD_NAME" --timeout=180s
 
       - name: Verify ssh works through sshpod
         env:
-          SSHPOD_BIN: ${{ github.workspace }}/target/release/sshpod
+          SSHPOD_BIN: /tmp/sshpod-bin/sshpod
+        shell: bash
         run: |
           set -euxo pipefail
+          POD_NAME="sshpod-e2e-${{ matrix.name }}"
           KUBE_CONTEXT="$(kubectl config current-context)"
-          cat > /tmp/sshpod_config <<EOF
+          cat >/tmp/sshpod_config <<EOF
 Host *.sshpod
   ProxyCommand ${SSHPOD_BIN} proxy --host %h --user %r --port %p --log-level info
   StrictHostKeyChecking no
@@ -58,5 +97,5 @@ Host *.sshpod
   BatchMode yes
 EOF
 
-          ssh -F /tmp/sshpod_config root@pod--sshpod-e2e.namespace--default.context--${KUBE_CONTEXT}.sshpod -- printf 'ssh-ok\n' > /tmp/ssh_output
+          ssh -F /tmp/sshpod_config "root@pod--${POD_NAME}.namespace--default.context--${KUBE_CONTEXT}.sshpod" -- printf 'ssh-ok\n' > /tmp/ssh_output
           grep -qx 'ssh-ok' /tmp/ssh_output
