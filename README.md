@@ -37,7 +37,7 @@ ssh root@deployment--<deployment-name>.namespace--<namespace-name>.context--<con
 
 ## Requirements
 - Local: `kubectl` configured for the target cluster; OpenSSH client (`ssh`, `scp`, `sftp`).
-- Pod side: `amd64` or `arm64`, `tar` available, `/tmp` writable. `xz` is not required; sshpod will fall back to gzip/plain if needed.
+- Pod side: `amd64` or `arm64`, `sh` and `tar` available, `/tmp` writable. `xz` is not required; sshpod will fall back to gzip/plain if needed.
 
 ## Developer notes
 

@@ -5,6 +5,14 @@ use std::process::{Output, Stdio};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
+#[derive(Clone, Debug)]
+pub struct RemoteTarget {
+    pub context: Option<String>,
+    pub namespace: String,
+    pub pod: String,
+    pub container: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct PodInfo {
     pub uid: String,
@@ -540,6 +548,17 @@ pub async fn exec_capture(
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+pub async fn exec_capture_target(target: &RemoteTarget, command: &[&str]) -> Result<String> {
+    exec_capture(
+        target.context.as_deref(),
+        target.namespace.as_str(),
+        target.pod.as_str(),
+        target.container.as_str(),
+        command,
+    )
+    .await
+}
+
 pub async fn exec_capture_optional(
     context: Option<&str>,
     namespace: &str,
@@ -554,6 +573,20 @@ pub async fn exec_capture_optional(
     Ok(Some(
         String::from_utf8_lossy(&output.stdout).trim().to_string(),
     ))
+}
+
+pub async fn exec_capture_optional_target(
+    target: &RemoteTarget,
+    command: &[&str],
+) -> Result<Option<String>> {
+    exec_capture_optional(
+        target.context.as_deref(),
+        target.namespace.as_str(),
+        target.pod.as_str(),
+        target.container.as_str(),
+        command,
+    )
+    .await
 }
 
 pub async fn exec_with_input(
@@ -598,6 +631,22 @@ pub async fn exec_with_input(
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+pub async fn exec_with_input_target(
+    target: &RemoteTarget,
+    command: &[&str],
+    input: &[u8],
+) -> Result<String> {
+    exec_with_input(
+        target.context.as_deref(),
+        target.namespace.as_str(),
+        target.pod.as_str(),
+        target.container.as_str(),
+        command,
+        input,
+    )
+    .await
 }
 
 async fn exec(

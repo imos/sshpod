@@ -37,7 +37,7 @@ ssh root@deployment--<deployment-name>.namespace--<namespace-name>.context--<con
 
 ## 要件
 - ローカル: 対象クラスタに到達できる `kubectl`、OpenSSH クライアント (`ssh`/`scp`/`sftp`)。
-- Pod 側: `amd64` または `arm64`、`tar` が利用可能、`/tmp` が書き込み可。`xz` が無くても sshpod が gzip/プレーン転送にフォールバックします。
+- Pod 側: `amd64` または `arm64`、`sh` および `tar` が利用可能、`/tmp` が書き込み可。`xz` が無くても sshpod が gzip/プレーン転送にフォールバックします。
 
 ## 開発メモ
 

@@ -8,19 +8,24 @@ pub async fn pump(stream: TcpStream) -> Result<()> {
     let mut stdout = io::stdout();
 
     let to_remote = tokio::spawn(async move {
-        tokio::io::copy(&mut stdin, &mut writer).await?;
+        let copied = tokio::io::copy(&mut stdin, &mut writer).await?;
         writer.shutdown().await?;
-        Ok::<_, anyhow::Error>(())
+        Ok::<_, anyhow::Error>(copied)
     });
 
     let from_remote = tokio::spawn(async move {
-        tokio::io::copy(&mut reader, &mut stdout).await?;
+        let copied = tokio::io::copy(&mut reader, &mut stdout).await?;
         stdout.flush().await?;
-        Ok::<_, anyhow::Error>(())
+        Ok::<_, anyhow::Error>(copied)
     });
 
     let (a, b) = tokio::join!(to_remote, from_remote);
-    a??;
-    b??;
+    let to_bytes = a??;
+    let from_bytes = b??;
+    // Debug logging kept compact
+    eprintln!(
+        "[sshpod][proxy_io] bytes_to_remote={} bytes_from_remote={}",
+        to_bytes, from_bytes
+    );
     Ok(())
 }
