@@ -95,10 +95,18 @@ jobs:
       - name: Verify ssh works through sshpod
         env:
           SSHPOD_BIN: /tmp/sshpod-bin/sshpod
+          SSHPOD_DEBUG_SSHD: ${{ matrix.name == 'busybox' && '1' || '' }}
         shell: bash
         run: |
           set -euxo pipefail
           POD_NAME="sshpod-e2e-${{ matrix.name }}"
           KUBE_CONTEXT="$(kubectl config current-context)"
           ssh "root@pod--${POD_NAME}.namespace--default.context--${KUBE_CONTEXT}.sshpod" -- echo 'ssh-ok' | tee /tmp/ssh_output
-          grep 'ssh-ok' /tmp/ssh_output
+          if ! grep -qx 'ssh-ok' /tmp/ssh_output; then
+            echo "unexpected ssh output:"
+            cat /tmp/ssh_output
+            POD_UID="$(kubectl get pod "$POD_NAME" -o jsonpath='{.metadata.uid}')"
+            kubectl exec "$POD_NAME" -- cat "/tmp/sshpod/${POD_UID}/${POD_NAME}/logs/sshd.log" || true
+            kubectl exec "$POD_NAME" -- cat "/tmp/sshpod/${POD_UID}/${POD_NAME}/logs/start.log" || true
+            exit 1
+          fi

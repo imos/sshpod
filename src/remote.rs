@@ -104,6 +104,30 @@ BASE_PARENT="$(dirname "$BASE")"
 TOP_DIR="$(dirname "$BASE_PARENT")"
 chmod 711 "$TOP_DIR" "$BASE_PARENT"
 
+exec 3>&1
+exec >"$BASE/logs/start.log" 2>&1
+if [ "${SSHPOD_DEBUG_SSHD:-}" = "1" ] || [ "${SSHPOD_DEBUG_SSHD:-}" = "true" ]; then
+  set -x
+fi
+
+get_home() {
+  if command -v getent >/dev/null 2>&1; then
+    getent passwd "$1" 2>/dev/null | awk -F: '{print $6}'
+  elif [ -f /etc/passwd ]; then
+    awk -F: -v u="$1" '$1==u {print $6}' /etc/passwd | head -n1
+  fi
+}
+
+have_user() {
+  if command -v getent >/dev/null 2>&1; then
+    getent passwd "$1" >/dev/null 2>&1
+  elif [ -f /etc/passwd ]; then
+    awk -F: -v u="$1" '$1==u {found=1} END{exit found?0:1}' /etc/passwd
+  else
+    return 1
+  fi
+}
+
 if [ ! -f "$BASE/authorized_keys" ]; then
   : > "$BASE/authorized_keys"
 fi
@@ -115,7 +139,7 @@ fi
 
 mkdir -p /tmp/empty
 chmod 755 /tmp/empty
-if ! getent passwd sshd >/dev/null 2>&1; then
+if ! have_user sshd; then
   if command -v useradd >/dev/null 2>&1; then
     useradd -r -M -d /tmp/empty -s /sbin/nologin sshd >/dev/null 2>&1 || true
   elif command -v adduser >/dev/null 2>&1; then
@@ -130,7 +154,7 @@ fi
 chmod 600 "$BASE/hostkeys/"*
 
 if [ -f "$BASE/sshd.pid" ] && kill -0 "$(cat "$BASE/sshd.pid")" 2>/dev/null && [ -f "$BASE/sshd.port" ]; then
-  cat "$BASE/sshd.port"
+  cat "$BASE/sshd.port" >&3
   exit 0
 fi
 
@@ -141,7 +165,7 @@ rand_port() {
 
 REMOTE_PATH="${PATH:-/usr/bin:/bin}"
 ENV_EXPORTS="$(env | awk -F= '/^KUBERNETES_/ {print $1}')"
-USER_HOME="$(getent passwd "$LOGIN_USER" 2>/dev/null | awk -F: '{print $6}')"
+USER_HOME="$(get_home "$LOGIN_USER")"
 
 i=0
 while [ $i -lt 30 ]; do
@@ -218,7 +242,7 @@ EOF
     if [ -f "$BASE/sshd.pid" ] && kill -0 "$(cat "$BASE/sshd.pid")" 2>/dev/null; then
       echo "$PORT" > "$BASE/sshd.port"
       chmod 600 "$BASE/sshd.pid" "$BASE/sshd.port"
-      echo "$PORT"
+      echo "$PORT" >&3
       exit 0
     fi
     j=$((j+1))
