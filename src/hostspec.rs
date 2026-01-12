@@ -133,9 +133,11 @@ mod tests {
     }
 
     #[test]
-    fn reject_missing_context() {
-        let err = parse("pod--app.namespace--ns.sshpod").unwrap_err();
-        assert!(matches!(err, HostSpecError::InvalidFormat));
+    fn parse_without_context() {
+        let spec = parse("pod--app.namespace--ns.sshpod").expect("should parse without context");
+        assert_eq!(spec.context, None);
+        assert_eq!(spec.namespace.as_deref(), Some("ns"));
+        assert_eq!(spec.target, Target::Pod("app".into()));
     }
 
     #[test]
