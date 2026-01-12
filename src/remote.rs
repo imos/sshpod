@@ -130,17 +130,21 @@ chmod 700 "$BASE" "$BASE/hostkeys" "$BASE/logs"
 BASE_PARENT="$(dirname "$BASE")"
 TOP_DIR="$(dirname "$BASE_PARENT")"
 chmod 711 "$TOP_DIR" "$BASE_PARENT"
+touch "$BASE/logs/start.log" || true
 
 exec 3>&1
+exec 4>&2
 exec >"$BASE/logs/start.log" 2>&1
 if [ "${SSHPOD_DEBUG_SSHD:-}" = "1" ] || [ "${SSHPOD_DEBUG_SSHD:-}" = "true" ]; then
   set -x
 fi
-case "${SSHPOD_DEBUG_SSHD_STDERR:-}" in
-  1|true|TRUE|yes|YES|on|ON)
-    trap "cat \"$BASE/logs/start.log\" >&2 2>/dev/null || true" EXIT
-    ;;
-esac
+
+dump_and_exit() {
+  if [ -f "$BASE/logs/start.log" ]; then
+    cat "$BASE/logs/start.log" >&4 2>/dev/null || true
+  fi
+  exit "$1"
+}
 
 get_home() {
   if command -v getent >/dev/null 2>&1; then
@@ -181,7 +185,7 @@ fi
 
 if [ ! -f "$BASE/hostkeys/ssh_host_ed25519_key" ]; then
   echo "host key missing at $BASE/hostkeys/ssh_host_ed25519_key" >&2
-  exit 1
+  dump_and_exit 1
 fi
 chmod 600 "$BASE/hostkeys/"*
 
@@ -283,7 +287,7 @@ EOF
 done
 
 echo "sshd did not start" >&2
-exit 1
+dump_and_exit 1
 "#;
 
 #[cfg(test)]
