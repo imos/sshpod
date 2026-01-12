@@ -49,6 +49,7 @@ jobs:
           $installHome = Join-Path $env:RUNNER_TEMP "sshpod-home"
           New-Item -ItemType Directory -Path $installHome -Force | Out-Null
           $env:USERPROFILE = $installHome
+          Set-Item Env:HOME $installHome
           ./install.ps1 -Yes
 
       - name: Verify install

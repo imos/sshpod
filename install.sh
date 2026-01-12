@@ -1,9 +1,5 @@
 #!/usr/bin/env sh
 set -eu
-# Best-effort pipefail for shells that support it (bash/zsh); ignore on others (e.g., dash)
-if set -o pipefail 2>/dev/null; then
-  :
-fi
 
 VERSION=""
 YES=0
