@@ -7,7 +7,7 @@ use crate::port_forward::PortForward;
 use crate::proxy_io;
 use crate::remote;
 use anyhow::{bail, Context, Result};
-use log::{info, Level};
+use log::info;
 use std::io::Write;
 use tokio::net::TcpStream;
 
@@ -27,12 +27,16 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
         .unwrap_or_else(whoami::username);
 
     kubectl::ensure_context_exists(&host.context).await?;
-    let mut namespace = host.namespace.clone();
-    if namespace.is_none() {
-        namespace = kubectl::get_context_namespace(&host.context).await?;
-    }
-    let ns_str = namespace.as_deref().unwrap_or("");
-    let context = Some(host.context.as_str());
+    let namespace = if let Some(ns) = host.namespace.clone() {
+        ns
+    } else {
+        kubectl::get_context_namespace(&host.context)
+            .await?
+            .unwrap_or_default()
+    };
+    let ns_str = namespace.as_str();
+    let context_str = host.context.as_str();
+    let context = Some(context_str);
 
     let pod_name = match &host.target {
         Target::Pod(pod) => pod.clone(),
@@ -45,9 +49,7 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
     };
     info!(
         "[sshpod] resolved pod: {} (namespace={}, context={})",
-        pod_name,
-        ns_str,
-        context.unwrap_or("<default>")
+        pod_name, ns_str, context_str
     );
 
     let pod_info = kubectl::get_pod_info(context, ns_str, &pod_name)
@@ -74,56 +76,33 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
 
     let base = format!("/tmp/sshpod/{}/{}", pod_info.uid, container);
 
-    let local_key = keys::ensure_local_key()
+    let local_key = keys::ensure_key("id_ed25519")
         .await
         .context("failed to ensure ~/.cache/sshpod/id_ed25519 exists")?;
+    let host_keys = keys::ensure_key("ssh_host_ed25519_key")
+        .await
+        .context("failed to create host keys")?;
 
-    remote::try_acquire_lock(
-        context,
-        namespace.as_deref().unwrap_or(""),
-        &pod_name,
-        &container,
-        &base,
-    )
-    .await;
-    remote::assert_login_user_allowed(
-        context,
-        namespace.as_deref().unwrap_or(""),
-        &pod_name,
-        &container,
-        &login_user,
-    )
-    .await?;
+    remote::try_acquire_lock(context, ns_str, &pod_name, &container, &base).await;
+    remote::assert_login_user_allowed(context, ns_str, &pod_name, &container, &login_user).await?;
 
-    let arch = bundle::detect_remote_arch(
-        context,
-        namespace.as_deref().unwrap_or(""),
-        &pod_name,
-        &container,
-    )
-    .await
-    .context("failed to detect remote arch")?;
+    let arch = bundle::detect_remote_arch(context, ns_str, &pod_name, &container)
+        .await
+        .context("failed to detect remote arch")?;
     info!("[sshpod] remote architecture: {}", arch);
-    bundle::ensure_bundle(
-        context,
-        namespace.as_deref().unwrap_or(""),
-        &pod_name,
-        &container,
-        &base,
-        &arch,
-    )
-    .await?;
+    bundle::ensure_bundle(context, ns_str, &pod_name, &container, &base, &arch).await?;
     info!("[sshpod] sshd bundle ready for pod {}", pod_name);
+    remote::install_host_keys(context, ns_str, &pod_name, &container, &base, &host_keys).await?;
 
     info!("[sshpod] starting/ensuring sshd in pod {}", pod_name);
     let remote_port = remote::ensure_sshd_running(
         context,
-        namespace.as_deref().unwrap_or(""),
+        ns_str,
         &pod_name,
         &container,
         &base,
         &login_user,
-        &local_key.public_key,
+        &local_key.public,
     )
     .await?;
     info!(
@@ -135,14 +114,8 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
         "[sshpod] starting port-forward to {}:{}",
         pod_name, remote_port
     );
-    let (mut forward, local_port) = PortForward::start(
-        context,
-        namespace.as_deref().unwrap_or(""),
-        &pod_name,
-        remote_port,
-        log::log_enabled!(Level::Debug),
-    )
-    .await?;
+    let (mut forward, local_port) =
+        PortForward::start(context, ns_str, &pod_name, remote_port).await?;
     info!(
         "[sshpod] port-forward established: localhost:{} -> {}:{}",
         local_port, pod_name, remote_port

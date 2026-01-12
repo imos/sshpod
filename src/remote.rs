@@ -1,3 +1,4 @@
+use crate::keys::Key;
 use crate::kubectl;
 use anyhow::{bail, Context, Result};
 use tokio::time::{timeout, Duration};
@@ -46,6 +47,54 @@ pub async fn assert_login_user_allowed(
     Ok(())
 }
 
+pub async fn install_host_keys(
+    context: Option<&str>,
+    namespace: &str,
+    pod: &str,
+    container: &str,
+    base: &str,
+    host_keys: &Key,
+) -> Result<()> {
+    let private = &host_keys.private;
+    let public = &host_keys.public;
+    let script = format!(
+        r#"set -eu
+BASE="{base}"
+PRIV="$BASE/hostkeys/ssh_host_ed25519_key"
+PUB="$BASE/hostkeys/ssh_host_ed25519_key.pub"
+TMP_PRIV="$BASE/hostkeys/.tmp_priv"
+TMP_PUB="$BASE/hostkeys/.tmp_pub"
+umask 077
+mkdir -p "$BASE" "$BASE/hostkeys" "$BASE/logs"
+chmod 700 "$BASE" "$BASE/hostkeys"
+cat > "$TMP_PRIV" <<'__SSH_PKEY__'
+{private}
+__SSH_PKEY__
+cat > "$TMP_PUB" <<'__SSH_PUB__'
+{public}
+__SSH_PUB__
+if [ -f "$PRIV" ] && [ -f "$PUB" ] && cmp -s "$PRIV" "$TMP_PRIV" && cmp -s "$PUB" "$TMP_PUB"; then
+  rm -f "$TMP_PRIV" "$TMP_PUB"
+  exit 0
+fi
+mv "$TMP_PRIV" "$PRIV"
+mv "$TMP_PUB" "$PUB"
+chmod 600 "$PRIV" "$PUB"
+"#
+    );
+    kubectl::exec_with_input(
+        context,
+        namespace,
+        pod,
+        container,
+        &["sh", "-s"],
+        script.as_bytes(),
+    )
+    .await
+    .with_context(|| format!("failed to install host keys into {}", base))?;
+    Ok(())
+}
+
 pub async fn ensure_sshd_running(
     context: Option<&str>,
     namespace: &str,
@@ -85,11 +134,10 @@ BASE="$1"
 LOGIN_USER="$2"
 PUBKEY_LINE="$3"
 SSHD="$BASE/bundle/sshd"
-SSHKEYGEN="$BASE/bundle/ssh-keygen"
 ENV_FILE="$BASE/environment"
 
 umask 077
-mkdir -p "$BASE" "$BASE/hostkeys" "$BASE/logs"
+mkdir -p "$BASE" "$BASE/logs" "$BASE/hostkeys"
 chmod 700 "$BASE" "$BASE/hostkeys" "$BASE/logs"
 BASE_PARENT="$(dirname "$BASE")"
 TOP_DIR="$(dirname "$BASE_PARENT")"
@@ -115,7 +163,8 @@ if ! getent passwd sshd >/dev/null 2>&1; then
 fi
 
 if [ ! -f "$BASE/hostkeys/ssh_host_ed25519_key" ]; then
-  "$SSHKEYGEN" -t ed25519 -f "$BASE/hostkeys/ssh_host_ed25519_key" -N '' >/dev/null
+  echo "host key missing at $BASE/hostkeys/ssh_host_ed25519_key" >&2
+  exit 1
 fi
 chmod 600 "$BASE/hostkeys/"*
 
@@ -138,10 +187,7 @@ while [ $i -lt 30 ]; do
   i=$((i+1))
   PORT="$(rand_port)"
 
-  if [ -f "$BASE/bundle/sshd_config.in" ]; then
-    sed -e "s|__BASE__|$BASE|g" -e "s|__PORT__|$PORT|g" "$BASE/bundle/sshd_config.in" > "$BASE/sshd_config"
-  else
-    cat > "$BASE/sshd_config" <<EOF
+  cat > "$BASE/sshd_config" <<EOF
 ListenAddress 127.0.0.1
 Port $PORT
 HostKey $BASE/hostkeys/ssh_host_ed25519_key
@@ -160,7 +206,6 @@ Subsystem sftp internal-sftp
 LogLevel VERBOSE
 PermitUserEnvironment yes
 EOF
-  fi
 
   printf 'SetEnv PATH=%s\n' "$REMOTE_PATH" >> "$BASE/sshd_config"
   for key in $ENV_EXPORTS; do
@@ -223,3 +268,6 @@ done
 echo "sshd did not start" >&2
 exit 1
 "#;
+
+#[cfg(test)]
+mod tests {}

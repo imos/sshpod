@@ -1,28 +1,49 @@
 use crate::paths;
 use anyhow::{Context, Result};
+use std::path::Path;
 use tokio::fs;
 use tokio::process::Command;
 
-pub struct LocalKey {
-    pub public_key: String,
+pub struct Key {
+    pub private: String,
+    pub public: String,
 }
 
-pub async fn ensure_local_key() -> Result<LocalKey> {
+pub async fn ensure_key(name: &str) -> Result<Key> {
     let cache_dir = paths::home_dir()?.join(".cache/sshpod");
-    fs::create_dir_all(&cache_dir)
+    prepare_dir(&cache_dir, 0o700).await?;
+
+    let private_key = cache_dir.join(name);
+    let public_key = private_key.with_extension("pub");
+
+    ensure_ed25519_keys(&private_key)
         .await
-        .with_context(|| format!("failed to create {}", cache_dir.display()))?;
+        .with_context(|| format!("failed to create keypair {}", name))?;
+
+    let private = fs::read_to_string(&private_key)
+        .await
+        .with_context(|| format!("failed to read {}", private_key.display()))?;
+    let public = fs::read_to_string(&public_key)
+        .await
+        .with_context(|| format!("failed to read {}", public_key.display()))?;
+
+    Ok(Key { private, public })
+}
+
+async fn prepare_dir(path: &Path, mode: u32) -> Result<()> {
+    fs::create_dir_all(path)
+        .await
+        .with_context(|| format!("failed to create {}", path.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&cache_dir, std::fs::Permissions::from_mode(0o700))
-            .await
-            .ok();
+        let _ = fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).await;
     }
+    Ok(())
+}
 
-    let private_key = cache_dir.join("id_ed25519");
+async fn ensure_ed25519_keys(private_key: &Path) -> Result<()> {
     let public_key = private_key.with_extension("pub");
-
     if !private_key.exists() || !public_key.exists() {
         let status = Command::new("ssh-keygen")
             .args([
@@ -40,11 +61,11 @@ pub async fn ensure_local_key() -> Result<LocalKey> {
             anyhow::bail!("ssh-keygen failed with status {}", status);
         }
     }
-
-    let public_key_contents = fs::read_to_string(&public_key)
-        .await
-        .with_context(|| format!("failed to read {}", public_key.display()))?;
-    Ok(LocalKey {
-        public_key: public_key_contents.trim().to_string(),
-    })
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(private_key, std::fs::Permissions::from_mode(0o600)).await;
+        let _ = fs::set_permissions(&public_key, std::fs::Permissions::from_mode(0o600)).await;
+    }
+    Ok(())
 }

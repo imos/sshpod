@@ -15,43 +15,15 @@ RUN CC="gcc" CFLAGS="-static" LDFLAGS="-static" ./configure \
     --without-pam \
     --without-libedit \
     --disable-strip
-RUN make -j"$(nproc)" sshd ssh-keygen scp
+RUN make -j"$(nproc)" sshd
 
 FROM alpine:3.20 AS bundle
 ARG OPENSSH_VERSION
-ARG BUNDLE_VERSION
-ARG BUNDLE_FILENAME=bundle.tar.xz
+ARG BINARY_FILENAME=sshd.xz
 ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /tmp/bundle
 RUN apk add --no-cache xz
-RUN mkdir -p bundle bundle/lib /out
-COPY --from=builder /src/openssh-${OPENSSH_VERSION}/sshd bundle/sshd
-COPY --from=builder /src/openssh-${OPENSSH_VERSION}/ssh-keygen bundle/ssh-keygen
-COPY --from=builder /src/openssh-${OPENSSH_VERSION}/scp bundle/scp
-RUN echo "${BUNDLE_VERSION:-dev}" > bundle/VERSION \
-  && echo "${TARGETOS}/${TARGETARCH}" > bundle/ARCH
-RUN cat > bundle/sshd_config.in <<'EOF'
-ListenAddress 127.0.0.1
-Port __PORT__
-
-HostKey __BASE__/hostkeys/ssh_host_ed25519_key
-PidFile __BASE__/sshd.pid
-AuthorizedKeysFile __BASE__/authorized_keys
-PubkeyAuthentication yes
-StrictModes no
-
-PasswordAuthentication no
-KbdInteractiveAuthentication no
-ChallengeResponseAuthentication no
-PermitEmptyPasswords no
-
-AllowAgentForwarding yes
-AllowTcpForwarding yes
-X11Forwarding no
-
-Subsystem sftp internal-sftp
-LogLevel VERBOSE
-PermitUserEnvironment yes
-EOF
-RUN tar c -C /tmp/bundle/bundle . | xz -9 > "/out/${BUNDLE_FILENAME}"
+RUN mkdir -p /out
+COPY --from=builder /src/openssh-${OPENSSH_VERSION}/sshd /tmp/sshd
+RUN xz -9 /tmp/sshd && mv /tmp/sshd.xz "/out/${BINARY_FILENAME}"

@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use serde::Deserialize;
+use serde::{de::DeserializeOwned, Deserialize};
 use std::collections::HashMap;
 use std::process::{Output, Stdio};
 use tokio::io::AsyncWriteExt;
@@ -163,6 +163,48 @@ fn kubectl_base(context: Option<&str>) -> Command {
     cmd
 }
 
+async fn run_kubectl_json<T: DeserializeOwned>(
+    context: Option<&str>,
+    args: &[&str],
+    action: &str,
+) -> Result<T> {
+    let output = kubectl_base(context)
+        .args(args)
+        .output()
+        .await
+        .with_context(|| format!("failed to run kubectl {}", action))?;
+    if !output.status.success() {
+        bail!(
+            "kubectl {} failed: {}",
+            action,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    serde_json::from_slice(&output.stdout)
+        .with_context(|| format!("failed to parse kubectl {} json output", action))
+}
+
+async fn fetch_with_ready_list<T: DeserializeOwned>(
+    context: Option<&str>,
+    namespace: &str,
+    kind: &str,
+    args: &[&str],
+    action: &str,
+) -> Result<T> {
+    match run_kubectl_json(context, args, action).await {
+        Ok(value) => Ok(value),
+        Err(err) => {
+            let mut message = err.to_string();
+            if let Ok(list) = list_resources(context, namespace, kind).await {
+                if !list.is_empty() {
+                    message.push_str(&format!(" Ready {kind}s: {}", list.join(", ")));
+                }
+            }
+            bail!(message);
+        }
+    }
+}
+
 pub async fn ensure_context_exists(context: &str) -> Result<()> {
     let contexts = list_contexts().await?;
     if contexts.iter().any(|c| c == context) {
@@ -224,25 +266,14 @@ pub async fn get_context_namespace(context: &str) -> Result<Option<String>> {
 }
 
 pub async fn get_pod_info(context: Option<&str>, namespace: &str, pod: &str) -> Result<PodInfo> {
-    let output = kubectl_base(context)
-        .args(["get", "pod", pod, "-n", namespace, "-o", "json"])
-        .output()
-        .await
-        .context("failed to run kubectl get pod")?;
-
-    if !output.status.success() {
-        let available = list_resources(context, namespace, "pod")
-            .await
-            .unwrap_or_default();
-        bail!(
-            "kubectl get pod failed: {}. Ready pods: {}",
-            String::from_utf8_lossy(&output.stderr).trim(),
-            available.join(", ")
-        );
-    }
-
-    let parsed: Pod = serde_json::from_slice(&output.stdout)
-        .context("failed to parse kubectl get pod json output")?;
+    let parsed: Pod = fetch_with_ready_list(
+        context,
+        namespace,
+        "pod",
+        &["get", "pod", pod, "-n", namespace, "-o", "json"],
+        "get pod",
+    )
+    .await?;
 
     Ok(PodInfo {
         uid: parsed.metadata.uid,
@@ -255,8 +286,11 @@ pub async fn choose_pod_for_deployment(
     namespace: &str,
     deployment: &str,
 ) -> Result<String> {
-    let output = kubectl_base(context)
-        .args([
+    let deploy: Deployment = fetch_with_ready_list(
+        context,
+        namespace,
+        "deployment",
+        &[
             "get",
             "deployment",
             deployment,
@@ -264,22 +298,10 @@ pub async fn choose_pod_for_deployment(
             namespace,
             "-o",
             "json",
-        ])
-        .output()
-        .await
-        .context("failed to run kubectl get deployment")?;
-    if !output.status.success() {
-        let available = list_resources(context, namespace, "deployment")
-            .await
-            .unwrap_or_default();
-        bail!(
-            "kubectl get deployment failed: {}. Ready deployments: {}",
-            String::from_utf8_lossy(&output.stderr).trim(),
-            available.join(", ")
-        );
-    }
-    let deploy: Deployment =
-        serde_json::from_slice(&output.stdout).context("failed to parse deployment json")?;
+        ],
+        &format!("get deployment {}", deployment),
+    )
+    .await?;
     let selector = to_selector(&deploy.spec.selector)?;
     select_pod(context, namespace, &selector, "deployment").await
 }
@@ -289,23 +311,14 @@ pub async fn choose_pod_for_job(
     namespace: &str,
     job: &str,
 ) -> Result<String> {
-    let output = kubectl_base(context)
-        .args(["get", "job", job, "-n", namespace, "-o", "json"])
-        .output()
-        .await
-        .context("failed to run kubectl get job")?;
-    if !output.status.success() {
-        let available = list_resources(context, namespace, "job")
-            .await
-            .unwrap_or_default();
-        bail!(
-            "kubectl get job failed: {}. Ready jobs: {}",
-            String::from_utf8_lossy(&output.stderr).trim(),
-            available.join(", ")
-        );
-    }
-    let job_spec: Job =
-        serde_json::from_slice(&output.stdout).context("failed to parse job json")?;
+    let job_spec: Job = fetch_with_ready_list(
+        context,
+        namespace,
+        "job",
+        &["get", "job", job, "-n", namespace, "-o", "json"],
+        &format!("get job {}", job),
+    )
+    .await?;
     let selector = if let Some(selector) = job_spec.spec.selector {
         to_selector(&selector)?
     } else if let Some(meta) = job_spec.spec.template.metadata {
@@ -329,19 +342,12 @@ async fn select_pod(
     selector: &str,
     kind: &str,
 ) -> Result<String> {
-    let output = kubectl_base(context)
-        .args(["get", "pods", "-n", namespace, "-l", selector, "-o", "json"])
-        .output()
-        .await
-        .context("failed to run kubectl get pods for selector")?;
-    if !output.status.success() {
-        bail!(
-            "kubectl get pods failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    let pods: PodList =
-        serde_json::from_slice(&output.stdout).context("failed to parse pods json")?;
+    let pods: PodList = run_kubectl_json(
+        context,
+        &["get", "pods", "-n", namespace, "-l", selector, "-o", "json"],
+        "get pods",
+    )
+    .await?;
     if pods.items.is_empty() {
         bail!(
             "no pods found for {} selector `{}` in namespace {}",
@@ -427,91 +433,94 @@ fn is_running(pod: &PodListItem) -> bool {
         .unwrap_or(false)
 }
 
+async fn list_from_json<T, F>(
+    context: Option<&str>,
+    namespace: &str,
+    resource: &str,
+    mapper: F,
+) -> Result<Vec<String>>
+where
+    T: DeserializeOwned,
+    F: FnOnce(T) -> Vec<String>,
+{
+    let action = format!("get {}", resource);
+    let list: T = run_kubectl_json(
+        context,
+        &["get", resource, "-n", namespace, "-o", "json"],
+        &action,
+    )
+    .await?;
+    Ok(mapper(list))
+}
+
 async fn list_resources(context: Option<&str>, namespace: &str, kind: &str) -> Result<Vec<String>> {
     match kind {
         "pod" => {
-            let output = kubectl_base(context)
-                .args(["get", "pods", "-n", namespace, "-o", "json"])
-                .output()
-                .await
-                .context("failed to list pods")?;
-            if !output.status.success() {
-                bail!(
-                    "kubectl get pods failed: {}",
-                    String::from_utf8_lossy(&output.stderr).trim()
-                );
-            }
-            let pods: PodList =
-                serde_json::from_slice(&output.stdout).context("failed to parse pod list")?;
-            Ok(pods
-                .items
-                .into_iter()
-                .filter(is_ready)
-                .map(|p| p.metadata.name)
-                .collect())
+            list_from_json(context, namespace, "pods", |pods: PodList| {
+                pods.items
+                    .into_iter()
+                    .filter(is_ready)
+                    .map(|p| p.metadata.name)
+                    .collect()
+            })
+            .await
         }
         "deployment" => {
-            let output = kubectl_base(context)
-                .args(["get", "deployments", "-n", namespace, "-o", "json"])
-                .output()
-                .await
-                .context("failed to list deployments")?;
-            if !output.status.success() {
-                bail!(
-                    "kubectl get deployments failed: {}",
-                    String::from_utf8_lossy(&output.stderr).trim()
-                );
-            }
-            let list: DeploymentList = serde_json::from_slice(&output.stdout)
-                .context("failed to parse deployment list")?;
-            Ok(list
-                .items
-                .into_iter()
-                .filter(|d| {
-                    if let Some(status) = &d.status {
-                        status
-                            .available_replicas
-                            .unwrap_or(0)
-                            .saturating_add(status.ready_replicas.unwrap_or(0))
-                            > 0
-                    } else {
-                        false
-                    }
-                })
-                .map(|d| d.metadata.name)
-                .collect())
+            list_from_json(context, namespace, "deployments", |list: DeploymentList| {
+                list.items
+                    .into_iter()
+                    .filter(|d| {
+                        if let Some(status) = &d.status {
+                            status
+                                .available_replicas
+                                .unwrap_or(0)
+                                .saturating_add(status.ready_replicas.unwrap_or(0))
+                                > 0
+                        } else {
+                            false
+                        }
+                    })
+                    .map(|d| d.metadata.name)
+                    .collect()
+            })
+            .await
         }
         "job" => {
-            let output = kubectl_base(context)
-                .args(["get", "jobs", "-n", namespace, "-o", "json"])
-                .output()
-                .await
-                .context("failed to list jobs")?;
-            if !output.status.success() {
-                bail!(
-                    "kubectl get jobs failed: {}",
-                    String::from_utf8_lossy(&output.stderr).trim()
-                );
-            }
-            let list: JobList =
-                serde_json::from_slice(&output.stdout).context("failed to parse job list")?;
-            Ok(list
-                .items
-                .into_iter()
-                .filter(|j| {
-                    if let Some(status) = &j.status {
-                        status.succeeded.unwrap_or(0) > 0
-                            || status.ready.unwrap_or(0) > 0
-                            || status.active.unwrap_or(0) > 0
-                    } else {
-                        false
-                    }
-                })
-                .map(|j| j.metadata.name)
-                .collect())
+            list_from_json(context, namespace, "jobs", |list: JobList| {
+                list.items
+                    .into_iter()
+                    .filter(|j| {
+                        if let Some(status) = &j.status {
+                            status.succeeded.unwrap_or(0) > 0
+                                || status.ready.unwrap_or(0) > 0
+                                || status.active.unwrap_or(0) > 0
+                        } else {
+                            false
+                        }
+                    })
+                    .map(|j| j.metadata.name)
+                    .collect()
+            })
+            .await
         }
         _ => Ok(Vec::new()),
     }
+}
+
+fn build_exec_command(
+    context: Option<&str>,
+    namespace: &str,
+    pod: &str,
+    container: &str,
+    wants_stdin: bool,
+) -> Command {
+    let mut cmd = kubectl_base(context);
+    cmd.arg("exec");
+    if wants_stdin {
+        cmd.arg("-i");
+    }
+    cmd.args(["-n", namespace, pod, "-c", container, "--"]);
+    cmd
 }
 
 pub async fn exec_capture(
@@ -555,8 +564,7 @@ pub async fn exec_with_input(
     command: &[&str],
     input: &[u8],
 ) -> Result<String> {
-    let mut cmd = kubectl_base(context);
-    cmd.args(["exec", "-i", "-n", namespace, pod, "-c", container, "--"]);
+    let mut cmd = build_exec_command(context, namespace, pod, container, true);
     cmd.args(command);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
@@ -600,8 +608,7 @@ async fn exec(
     command: &[&str],
     input: Option<&[u8]>,
 ) -> Result<Output> {
-    let mut cmd = kubectl_base(context);
-    cmd.args(["exec", "-n", namespace, pod, "-c", container, "--"]);
+    let mut cmd = build_exec_command(context, namespace, pod, container, input.is_some());
     cmd.args(command);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
@@ -624,4 +631,36 @@ async fn exec(
         .await
         .context("failed to wait for kubectl exec")?;
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_ready_true() {
+        let pod = PodListItem {
+            metadata: PodMetadataName { name: "p".into() },
+            status: Some(PodStatus {
+                phase: Some("Running".into()),
+                conditions: Some(vec![PodCondition {
+                    type_name: "Ready".into(),
+                    status: "True".into(),
+                }]),
+            }),
+        };
+        assert!(is_ready(&pod));
+    }
+
+    #[test]
+    fn test_is_ready_false_when_not_running() {
+        let pod = PodListItem {
+            metadata: PodMetadataName { name: "p".into() },
+            status: Some(PodStatus {
+                phase: Some("Pending".into()),
+                conditions: None,
+            }),
+        };
+        assert!(!is_ready(&pod));
+    }
 }
