@@ -1,6 +1,6 @@
 # sshpod
 
-`sshpod` lets you SSH into a Kubernetes Pod from your regular OpenSSH client. It rewrites `~/.ssh/config` to use a ProxyCommand so that `ssh pod--???.context--???.sshpod` starts a pod-local `sshd` via `kubectl` and forwards your session.
+`sshpod` lets you SSH into a Kubernetes Pod from your regular OpenSSH client. It rewrites `~/.ssh/config` to use a ProxyCommand so that `ssh pod--<pod-name>.context--<context-name>.sshpod` starts a pod-local `sshd` via `kubectl` and forwards your session.
 
 ## Install
 
@@ -27,12 +27,12 @@ Host *.sshpod
 
 ## Usage
 ```bash
-ssh root@deployment--<deployment>.namespace--<namespace>.context--<context>.sshpod
+ssh root@deployment--<deployment-name>.namespace--<namespace-name>.context--<context-name>.sshpod
 ```
 - `context` is required.
 - `namespace` is optional; when omitted, the default namespace of the context is used.
-- `container--<container>.` prefix is needed only for multi-container Pods.
-- Resource types: `pod--...`, `deployment--...`, `job--...`.
+- `container--<container-name>.` prefix is needed only for multi-container Pods.
+- Resource types: `pod--<pod-name>`, `deployment--<deployment-name>`, `job--<job-name>`.
 - The SSH user must match the user inside the container.
 
 ## Requirements
