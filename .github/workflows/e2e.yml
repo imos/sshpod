@@ -104,7 +104,11 @@ jobs:
             BatchMode yes
           EOF
 
-          ssh -vvv -F /tmp/sshpod_config "root@pod--${POD_NAME}.namespace--default.context--${KUBE_CONTEXT}.sshpod" -- sh -c 'touch /tmp/sshpod-e2e-marker && yes ssh-ok | head -n 10000' 2>&1 | tee /tmp/ssh_output
+          REMOTE_SCRIPT=$'set -eux\npwd\nid\nls -l /tmp/sshpod-e2e-marker || true\ntouch /tmp/sshpod-e2e-marker\nls -l /tmp/sshpod-e2e-marker\nyes ssh-ok | head -n 10000'
+          echo "remote script:"
+          printf '%s\n' "$REMOTE_SCRIPT"
+
+          ssh -vvv -F /tmp/sshpod_config "root@pod--${POD_NAME}.namespace--default.context--${KUBE_CONTEXT}.sshpod" -- /bin/sh -lc "$REMOTE_SCRIPT" 2>&1 | tee /tmp/ssh_output
           ok_lines="$(grep -c '^ssh-ok$' /tmp/ssh_output || true)"
           echo "ssh-ok lines seen: ${ok_lines}"
           if [ "${ok_lines}" -lt 10 ]; then
