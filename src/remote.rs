@@ -70,21 +70,18 @@ pub async fn ensure_sshd_running(
 ) -> Result<u16> {
     let script = START_SSHD_SCRIPT.as_bytes();
     let result = timeout(Duration::from_secs(40), {
-        async move {
-            kubectl::exec_with_input_target(
-                target,
-                &["sh", "-s", "--", base, login_user, pubkey_line],
-                script,
-            )
-            .await
-        }
+        kubectl::exec_with_input_target(
+            target,
+            &["sh", "-s", "--", base, login_user, pubkey_line],
+            script,
+        )
     })
     .await
     .map_err(|_| anyhow::anyhow!("starting sshd timed out after 40s"))?;
 
     let output = match result {
-        Ok(Ok(out)) => out,
-        Ok(Err(err)) => {
+        Ok(out) => out,
+        Err(err) => {
             if let Some(log) = read_start_log(target, base).await? {
                 return Err(err.context(format!(
                     "failed to start sshd under {}\nstart.log:\n{}",
@@ -93,7 +90,6 @@ pub async fn ensure_sshd_running(
             }
             return Err(err.context(format!("failed to start sshd under {}", base)));
         }
-        Err(err) => return Err(err.context(format!("failed to start sshd under {}", base))),
     };
 
     let port: u16 = output
