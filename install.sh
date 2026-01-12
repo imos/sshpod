@@ -43,22 +43,37 @@ detect_arch() {
 
 fetch_latest_version() {
   api="https://api.github.com/repos/imos/sshpod/releases/latest"
+  web="https://github.com/imos/sshpod/releases/latest"
   auth_arg=""
   if [ -n "${GITHUB_TOKEN:-}" ]; then
     auth_arg="-H" "Authorization: Bearer ${GITHUB_TOKEN}"
   fi
+
+  try_api() {
+    if resp=$(curl -fsSL $auth_arg "$api" 2>/dev/null); then
+      printf "%s" "$resp" | grep -m1 '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/' || true
+    fi
+  }
+
+  try_redirect() {
+    curl -fsSLI -o /dev/null -w '%{url_effective}' "$web" 2>/dev/null \
+      | sed -E 's#.*/tag/v?([^/]+)$#\1#'
+  }
+
   attempt=1
   while [ "$attempt" -le 5 ]; do
-    if resp=$(curl -fsSL $auth_arg "$api" 2>/dev/null); then
-      version=$(printf "%s" "$resp" | grep -m1 '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/' || true)
-      if [ -n "$version" ]; then
-        echo "$version"
-        return 0
-      fi
+    version="$(try_api)"
+    if [ -z "$version" ]; then
+      version="$(try_redirect)"
+    fi
+    if [ -n "$version" ]; then
+      echo "$version"
+      return 0
     fi
     sleep "$attempt"
     attempt=$((attempt + 1))
   done
+
   echo "Failed to determine latest version from GitHub releases after retries." >&2
   exit 1
 }
