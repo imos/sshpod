@@ -82,7 +82,7 @@ pub async fn ensure_sshd_running(
     let output = match result {
         Ok(out) => out,
         Err(err) => {
-            if let Some(log) = read_start_log(target, base).await? {
+            if let Some(log) = read_start_log(target, base).await {
                 return Err(err.context(format!(
                     "failed to start sshd under {} (start.log below)\n{}",
                     base, log
@@ -99,12 +99,20 @@ pub async fn ensure_sshd_running(
     Ok(port)
 }
 
-async fn read_start_log(target: &RemoteTarget, base: &str) -> Result<Option<String>> {
-    kubectl::exec_capture_optional_target(
+async fn read_start_log(target: &RemoteTarget, base: &str) -> Option<String> {
+    match kubectl::exec_capture_optional_target(
         target,
         &["sh", "-c", &format!("tail -n 200 {}/logs/start.log", base)],
     )
     .await
+    {
+        Ok(Some(log)) => Some(log),
+        Ok(None) => Some(format!("start.log unavailable at {}/logs/start.log", base)),
+        Err(err) => Some(format!(
+            "failed to read start.log at {}/logs/start.log: {}",
+            base, err
+        )),
+    }
 }
 
 const START_SSHD_SCRIPT: &str = r#"#!/bin/sh

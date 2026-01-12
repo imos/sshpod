@@ -110,15 +110,19 @@ jobs:
 
           if [ "$ssh_status" -ne 0 ]; then
             echo "ssh command failed (status $ssh_status), fetching logs..."
-            kubectl exec "$POD_NAME" -- cat "/tmp/sshpod/${POD_UID}/${POD_NAME}/logs/start.log" || true
-            kubectl exec "$POD_NAME" -- cat "/tmp/sshpod/${POD_UID}/${POD_NAME}/logs/sshd.log" || true
+            kubectl exec "$POD_NAME" -- sh -c "ls -l /tmp/sshpod/${POD_UID}/${POD_NAME}/logs || true"
+            kubectl exec "$POD_NAME" -- sh -c "cat /tmp/sshpod/${POD_UID}/${POD_NAME}/logs/start.log 2>&1 || true"
+            kubectl exec "$POD_NAME" -- sh -c "cat /tmp/sshpod/${POD_UID}/${POD_NAME}/logs/sshd.log 2>&1 || true"
+            kubectl logs "$POD_NAME" || true
             exit 1
           fi
 
           if ! grep -qx 'ssh-ok' /tmp/ssh_output; then
             echo "unexpected ssh output:"
             cat /tmp/ssh_output
-            kubectl exec "$POD_NAME" -- cat "/tmp/sshpod/${POD_UID}/${POD_NAME}/logs/start.log" || true
-            kubectl exec "$POD_NAME" -- cat "/tmp/sshpod/${POD_UID}/${POD_NAME}/logs/sshd.log" || true
+            kubectl exec "$POD_NAME" -- sh -c "ls -l /tmp/sshpod/${POD_UID}/${POD_NAME}/logs || true"
+            kubectl exec "$POD_NAME" -- sh -c "cat /tmp/sshpod/${POD_UID}/${POD_NAME}/logs/start.log 2>&1 || true"
+            kubectl exec "$POD_NAME" -- sh -c "cat /tmp/sshpod/${POD_UID}/${POD_NAME}/logs/sshd.log 2>&1 || true"
+            kubectl logs "$POD_NAME" || true
             exit 1
           fi
