@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/imos/sshpod/main/install.sh | sh -s
 2. `sshpod configure` を実行する（`~/.ssh/config` をバックアップしつつ sshpod 用ブロックを書き換えます）、または次のブロックを自分で追加してください。バイナリの設置場所に合わせてパスを調整してください:
 ```sshconfig
 Host *.sshpod
-  ProxyCommand ~/.local/bin/sshpod proxy --host %h --user %r --port %p
+  ProxyCommand sshpod proxy --host %h --user %r --port %p
   StrictHostKeyChecking no
   UserKnownHostsFile /dev/null
   GlobalKnownHostsFile /dev/null
@@ -36,7 +36,7 @@ ssh app@container--sidecar.pod--debug.namespace--tools.context--dev.sshpod
 scp ./local.tgz ubuntu@job--batch.namespace--etl.context--dev.sshpod:/tmp/
 ```
 - `.sshpod` サフィックスは必須（DNS への登録は不要）。
-- 対象: `pod--<pod>`（プレフィックス省略時のデフォルト）、`deployment--<deployment>`、`job--<job>`。Deployment/Job は Ready な Pod を自動で選択します。
+- 対象は `pod--<pod>`、`deployment--<deployment>`、`job--<job>` のいずれかで指定します。Deployment/Job は Ready な Pod を自動で選択します。
 - オプション: `container--<container>`（マルチコンテナ Pod では必須）、`namespace--<namespace>`（コンテキストに設定された namespace があればそれを、無い場合はクラスタのデフォルトを使用）、`context--<context>`（省略時は現在の `kubectl` コンテキスト）。
 - Pod が非 root で動いている場合、SSH ユーザはコンテナ内の実ユーザと一致させてください。root Pod であれば任意のユーザで接続できます。
 

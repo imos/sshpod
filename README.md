@@ -17,7 +17,7 @@ Installs the latest release to `~/.local/bin` (override with `--prefix`) and run
 2. Run `sshpod configure` (backs up `~/.ssh/config` and rewrites the sshpod block), or add the block below yourself—adjust the path if you installed elsewhere:
 ```sshconfig
 Host *.sshpod
-  ProxyCommand ~/.local/bin/sshpod proxy --host %h --user %r --port %p
+  ProxyCommand sshpod proxy --host %h --user %r --port %p
   StrictHostKeyChecking no
   UserKnownHostsFile /dev/null
   GlobalKnownHostsFile /dev/null
@@ -37,7 +37,7 @@ ssh app@container--sidecar.pod--debug.namespace--tools.context--dev.sshpod
 scp ./local.tgz ubuntu@job--batch.namespace--etl.context--dev.sshpod:/tmp/
 ```
 - `.sshpod` suffix is required; no DNS entry is needed.
-- Targets: `pod--<pod>` (default if you omit the prefix), `deployment--<deployment>`, `job--<job>`; deployments/jobs pick a ready Pod automatically.
+- Targets: `pod--<pod>`, `deployment--<deployment>`, `job--<job>`; deployments/jobs pick a ready Pod automatically.
 - Optional pieces: `container--<container>` (required for multi-container Pods), `namespace--<namespace>` (falls back to the namespace set on the context, otherwise the cluster default), `context--<context>` (defaults to your current `kubectl` context).
 - Pods running as non-root require you to SSH as that user; root Pods accept any SSH user.
 
