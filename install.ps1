@@ -50,9 +50,26 @@ function Get-Version([string]$Value) {
     if (-not [string]::IsNullOrWhiteSpace($Value)) {
         return $Value
     }
-    $resp = Invoke-WebRequest -UseBasicParsing -Headers @{ "User-Agent" = "sshpod-install" } -Uri "https://api.github.com/repos/imos/sshpod/releases/latest"
-    $json = $resp.Content | ConvertFrom-Json
-    return $json.tag_name.TrimStart("v")
+    $headers = @{ "User-Agent" = "sshpod-install" }
+    if ($env:GITHUB_TOKEN) {
+        $headers["Authorization"] = "Bearer $($env:GITHUB_TOKEN)"
+    }
+    $version = ""
+    foreach ($attempt in 1..5) {
+        try {
+            $resp = Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri "https://api.github.com/repos/imos/sshpod/releases/latest"
+            $json = $resp.Content | ConvertFrom-Json
+            $version = $json.tag_name.TrimStart("v")
+            if (-not [string]::IsNullOrWhiteSpace($version)) { break }
+        }
+        catch {
+            Start-Sleep -Seconds $attempt
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($version)) {
+        throw "Failed to determine latest version from GitHub releases after retries."
+    }
+    return $version
 }
 
 function Prompt-Configure([string]$ExePath) {

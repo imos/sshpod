@@ -41,8 +41,30 @@ detect_arch() {
   echo "${os_part}_${arch_part}"
 }
 
+fetch_latest_version() {
+  api="https://api.github.com/repos/imos/sshpod/releases/latest"
+  auth_arg=""
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    auth_arg="-H" "Authorization: Bearer ${GITHUB_TOKEN}"
+  fi
+  attempt=1
+  while [ "$attempt" -le 5 ]; do
+    if resp=$(curl -fsSL $auth_arg "$api" 2>/dev/null); then
+      version=$(printf "%s" "$resp" | grep -m1 '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/' || true)
+      if [ -n "$version" ]; then
+        echo "$version"
+        return 0
+      fi
+    fi
+    sleep "$attempt"
+    attempt=$((attempt + 1))
+  done
+  echo "Failed to determine latest version from GitHub releases after retries." >&2
+  exit 1
+}
+
 if [ -z "$VERSION" ]; then
-  VERSION="$(curl -fsSL https://api.github.com/repos/imos/sshpod/releases/latest | grep -m1 '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/')"
+  VERSION="$(fetch_latest_version)"
 fi
 
 ARCH_NAME="$(detect_arch)"
