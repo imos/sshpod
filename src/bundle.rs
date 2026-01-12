@@ -217,8 +217,11 @@ fn decompress_xz(data: &[u8]) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::decompress_xz;
-    use std::io::Write;
+    use super::{decompress_xz, ensure_plain_data, gzip_payload, load_bundle_data};
+    use flate2::read::GzDecoder;
+    use std::io::{Read, Write};
+    use std::{fs, path::PathBuf};
+    use tokio::runtime::Runtime;
     use xz2::write::XzEncoder;
 
     #[test]
@@ -228,5 +231,48 @@ mod tests {
         let data = encoder.finish().unwrap();
         let out = decompress_xz(&data).expect("decompress");
         assert_eq!(out, b"hello world");
+    }
+
+    #[test]
+    fn ensure_plain_data_caches_decompression() {
+        let mut encoder = XzEncoder::new(Vec::new(), 6);
+        encoder.write_all(b"cache me").unwrap();
+        let data = encoder.finish().unwrap();
+
+        let mut cache = None;
+        let first = ensure_plain_data(&data, &mut cache).expect("first decode");
+        assert_eq!(first, b"cache me");
+        let first_ptr = first.as_ptr();
+
+        let second = ensure_plain_data(&data, &mut cache).expect("second decode");
+        assert_eq!(second, b"cache me");
+        assert_eq!(first_ptr, second.as_ptr(), "cache should be reused");
+    }
+
+    #[test]
+    fn gzip_payload_round_trip() {
+        let gz = gzip_payload(b"ping").expect("gzip");
+        let mut decoder = GzDecoder::new(&gz[..]);
+        let mut out = String::new();
+        decoder.read_to_string(&mut out).expect("gunzip");
+        assert_eq!(out.as_bytes(), b"ping");
+    }
+
+    #[test]
+    fn load_bundle_data_reads_filesystem() {
+        let rt = Runtime::new().unwrap();
+        let path = PathBuf::from("sshd_test.xz");
+
+        let mut encoder = XzEncoder::new(Vec::new(), 6);
+        encoder.write_all(b"from file").unwrap();
+        let data = encoder.finish().unwrap();
+        fs::write(&path, &data).expect("write test bundle");
+
+        let loaded = rt
+            .block_on(load_bundle_data("test"))
+            .expect("load bundle data");
+        assert_eq!(&*loaded, data.as_slice());
+
+        fs::remove_file(&path).ok();
     }
 }
