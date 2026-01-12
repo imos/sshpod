@@ -104,5 +104,9 @@ jobs:
             BatchMode yes
           EOF
 
-          ssh -F /tmp/sshpod_config "root@pod--${POD_NAME}.namespace--default.context--${KUBE_CONTEXT}.sshpod" -- printf 'ssh-ok\n' > /tmp/ssh_output
-          grep -qx 'ssh-ok' /tmp/ssh_output
+          ssh -F /tmp/sshpod_config "root@pod--${POD_NAME}.namespace--default.context--${KUBE_CONTEXT}.sshpod" -- sh -c 'echo ssh-ok' | tee /tmp/ssh_output
+          if ! grep -qx 'ssh-ok' /tmp/ssh_output; then
+            echo "unexpected ssh output:"
+            cat /tmp/ssh_output
+            exit 1
+          fi
