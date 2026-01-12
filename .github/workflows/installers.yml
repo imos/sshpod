@@ -46,19 +46,19 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $home = Join-Path $env:RUNNER_TEMP "sshpod-home"
-          New-Item -ItemType Directory -Path $home -Force | Out-Null
-          $env:USERPROFILE = $home
+          $installHome = Join-Path $env:RUNNER_TEMP "sshpod-home"
+          New-Item -ItemType Directory -Path $installHome -Force | Out-Null
+          $env:USERPROFILE = $installHome
           ./install.ps1 -Yes
 
       - name: Verify install
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $home = Join-Path $env:RUNNER_TEMP "sshpod-home"
-          $bin = Join-Path $home ".local\bin\sshpod.exe"
+          $installHome = Join-Path $env:RUNNER_TEMP "sshpod-home"
+          $bin = Join-Path $installHome ".local\bin\sshpod.exe"
           if (-not (Test-Path $bin)) { throw "sshpod.exe missing" }
           & $bin --version
-          $config = Join-Path $home ".ssh\config"
+          $config = Join-Path $installHome ".ssh\config"
           if (-not (Test-Path $config)) { throw "config not found" }
           if (-not (Select-String -Path $config -SimpleMatch "Host *.sshpod")) { throw "ssh config block missing" }
