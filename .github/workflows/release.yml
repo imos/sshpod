@@ -26,7 +26,7 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           release_name: sshpod ${{ inputs.version }}
-          draft: false
+          draft: true
           prerelease: false
 
   build:
@@ -39,20 +39,26 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             arch_name: linux_amd64
             use_zigbuild: "false"
+            runner: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
             arch_name: linux_arm64
             use_zigbuild: "true"
+            runner: ubuntu-latest
           - target: aarch64-apple-darwin
             arch_name: darwin_arm64
-            use_zigbuild: "true"
-          - target: x86_64-pc-windows-gnu
+            use_zigbuild: "false"
+            runner: macos-latest
+          - target: x86_64-pc-windows-msvc
             arch_name: windows_amd64
-            use_zigbuild: "true"
-          - target: aarch64-pc-windows-gnu
+            use_zigbuild: "false"
+            runner: windows-latest
+          - target: aarch64-pc-windows-msvc
             arch_name: windows_arm64
-            use_zigbuild: "true"
+            use_zigbuild: "false"
+            runner: windows-latest
     env:
       VERSION: ${{ inputs.version }}
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -60,6 +66,7 @@ jobs:
           lfs: true
 
       - name: Set up Zig
+        if: ${{ matrix.use_zigbuild == 'true' }}
         uses: goto-bus-stop/setup-zig@v2
         with:
           version: "0.12.0"
@@ -70,6 +77,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install cargo-zigbuild
+        if: ${{ matrix.use_zigbuild == 'true' }}
         run: cargo install cargo-zigbuild
 
       - name: Build release
