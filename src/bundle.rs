@@ -5,11 +5,11 @@ use flate2::Compression;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::env;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::PathBuf;
 use xz2::read::XzDecoder;
 
-pub const BUNDLE_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "+bundle1");
+pub const BUNDLE_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "+sshd1");
 
 pub async fn detect_remote_arch(
     context: Option<&str>,
@@ -62,27 +62,39 @@ pub async fn ensure_bundle(
         )
     };
 
-    let install = format!("umask 077; mkdir -p \"{base}/bundle\"; tar xJf - -C \"{base}/bundle\"");
+    let meta = format!(
+        "printf '%s\\n' \"{BUNDLE_VERSION}\" > \"{base}/bundle/VERSION\"; \
+         printf '%s\\n' \"{arch}\" > \"{base}/bundle/ARCH\"; \
+         chmod 600 \"{base}/bundle/VERSION\" \"{base}/bundle/ARCH\";"
+    );
+
+    let install_xz = format!(
+        "set -eu; umask 077; mkdir -p \"{base}/bundle\"; chmod 700 \"{base}\" \"{base}/bundle\"; \
+         xz -dc > \"{base}/bundle/sshd\"; chmod 700 \"{base}/bundle/sshd\"; {meta}"
+    );
     match kubectl::exec_with_input(
         context,
         namespace,
         pod,
         container,
-        &["sh", "-c", &install],
+        &["sh", "-c", &install_xz],
         &bundle_data,
     )
     .await
     {
         Ok(_) => return Ok(()),
         Err(first_err) => {
-            let tar_data =
-                decompress_tar_xz(&bundle_data).context("failed to decompress tar.xz locally")?;
+            let sshd_data =
+                decompress_xz(&bundle_data).context("failed to decompress sshd xz locally")?;
             let mut gz = GzEncoder::new(Vec::new(), Compression::default());
-            gz.write_all(&tar_data).context("failed to gzip bundle")?;
+            use std::io::Write;
+            gz.write_all(&sshd_data).context("failed to gzip sshd")?;
             let gz_data = gz.finish().context("failed to finalize gzip")?;
 
-            let install_gz =
-                format!("umask 077; mkdir -p \"{base}/bundle\"; tar xzf - -C \"{base}/bundle\"");
+            let install_gz = format!(
+                "set -eu; umask 077; mkdir -p \"{base}/bundle\"; chmod 700 \"{base}\" \"{base}/bundle\"; \
+                 gzip -dc > \"{base}/bundle/sshd\"; chmod 700 \"{base}/bundle/sshd\"; {meta}"
+            );
             match kubectl::exec_with_input(
                 context,
                 namespace,
@@ -96,7 +108,8 @@ pub async fn ensure_bundle(
                 Ok(_) => return Ok(()),
                 Err(second_err) => {
                     let install_plain = format!(
-                        "umask 077; mkdir -p \"{base}/bundle\"; tar xf - -C \"{base}/bundle\""
+                        "set -eu; umask 077; mkdir -p \"{base}/bundle\"; chmod 700 \"{base}\" \"{base}/bundle\"; \
+                         cat > \"{base}/bundle/sshd\"; chmod 700 \"{base}/bundle/sshd\"; {meta}"
                     );
                     kubectl::exec_with_input(
                         context,
@@ -104,7 +117,7 @@ pub async fn ensure_bundle(
                         pod,
                         container,
                         &["sh", "-c", &install_plain],
-                        &tar_data,
+                        &sshd_data,
                     )
                     .await
                     .with_context(|| {
@@ -122,7 +135,11 @@ pub async fn ensure_bundle(
 }
 
 fn locate_bundle(arch: &str) -> Result<PathBuf> {
-    let filename = format!("openssh-bundle-{arch}.tar.xz");
+    let filename = match arch {
+        "linux/amd64" => "sshd_amd64.xz".to_string(),
+        "linux/arm64" => "sshd_arm64.xz".to_string(),
+        _ => format!("sshd_{}.xz", arch.replace('/', "_")),
+    };
     let mut candidates = Vec::new();
     let mut seen = HashSet::new();
 
@@ -150,7 +167,7 @@ fn locate_bundle(arch: &str) -> Result<PathBuf> {
     );
 }
 
-fn decompress_tar_xz(data: &[u8]) -> Result<Vec<u8>> {
+fn decompress_xz(data: &[u8]) -> Result<Vec<u8>> {
     let mut decoder = XzDecoder::new(data);
     let mut buf = Vec::new();
     decoder
@@ -161,13 +178,16 @@ fn decompress_tar_xz(data: &[u8]) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::decompress_tar_xz;
+    use super::decompress_xz;
+    use std::io::Write;
+    use xz2::write::XzEncoder;
 
     #[test]
     fn decompress_smoke() {
-        // Simple tar.xz archive containing one file with contents "hello\n"
-        let data = include_bytes!("../tests/data/hello.tar.xz");
-        let out = decompress_tar_xz(data).expect("decompress");
-        assert!(out.windows(5).any(|w| w == b"hello"));
+        let mut encoder = XzEncoder::new(Vec::new(), 6);
+        encoder.write_all(b"hello world").unwrap();
+        let data = encoder.finish().unwrap();
+        let out = decompress_xz(&data).expect("decompress");
+        assert_eq!(out, b"hello world");
     }
 }

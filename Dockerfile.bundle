@@ -15,20 +15,15 @@ RUN CC="gcc" CFLAGS="-static" LDFLAGS="-static" ./configure \
     --without-pam \
     --without-libedit \
     --disable-strip
-RUN make -j"$(nproc)" sshd ssh-keygen scp
+RUN make -j"$(nproc)" sshd
 
 FROM alpine:3.20 AS bundle
 ARG OPENSSH_VERSION
-ARG BUNDLE_VERSION
-ARG BUNDLE_FILENAME=bundle.tar.xz
+ARG BINARY_FILENAME=sshd.xz
 ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /tmp/bundle
 RUN apk add --no-cache xz
-RUN mkdir -p bundle bundle/lib /out
-COPY --from=builder /src/openssh-${OPENSSH_VERSION}/sshd bundle/sshd
-COPY --from=builder /src/openssh-${OPENSSH_VERSION}/ssh-keygen bundle/ssh-keygen
-COPY --from=builder /src/openssh-${OPENSSH_VERSION}/scp bundle/scp
-RUN echo "${BUNDLE_VERSION:-dev}" > bundle/VERSION \
-  && echo "${TARGETOS}/${TARGETARCH}" > bundle/ARCH
-RUN tar c -C /tmp/bundle/bundle . | xz -9 > "/out/${BUNDLE_FILENAME}"
+RUN mkdir -p /out
+COPY --from=builder /src/openssh-${OPENSSH_VERSION}/sshd /tmp/sshd
+RUN xz -9 /tmp/sshd && mv /tmp/sshd.xz "/out/${BINARY_FILENAME}"

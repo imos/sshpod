@@ -76,9 +76,12 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
 
     let base = format!("/tmp/sshpod/{}/{}", pod_info.uid, container);
 
-    let local_key = keys::ensure_local_key()
+    let local_key = keys::ensure_key("id_ed25519")
         .await
         .context("failed to ensure ~/.cache/sshpod/id_ed25519 exists")?;
+    let host_keys = keys::ensure_key("ssh_host_ed25519_key")
+        .await
+        .context("failed to create host keys")?;
 
     remote::try_acquire_lock(context, ns_str, &pod_name, &container, &base).await;
     remote::assert_login_user_allowed(context, ns_str, &pod_name, &container, &login_user).await?;
@@ -89,6 +92,7 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
     info!("[sshpod] remote architecture: {}", arch);
     bundle::ensure_bundle(context, ns_str, &pod_name, &container, &base, &arch).await?;
     info!("[sshpod] sshd bundle ready for pod {}", pod_name);
+    remote::install_host_keys(context, ns_str, &pod_name, &container, &base, &host_keys).await?;
 
     info!("[sshpod] starting/ensuring sshd in pod {}", pod_name);
     let remote_port = remote::ensure_sshd_running(
@@ -98,7 +102,7 @@ pub async fn run(args: ProxyArgs) -> Result<()> {
         &container,
         &base,
         &login_user,
-        &local_key.public_key,
+        &local_key.public,
     )
     .await?;
     info!(

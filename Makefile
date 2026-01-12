@@ -2,10 +2,9 @@ CARGO ?= cargo
 DOCKER ?= docker
 INSTALL_ROOT ?= $(HOME)/.local
 BUNDLES_DIR ?= $(CURDIR)/bundles
-ARCHES ?= linux/amd64 linux/arm64
+ARCHES ?= amd64 arm64
 OPENSSH_VERSION ?= 9.7p1
-BUNDLE_VERSION ?= $(shell sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)+bundle1
-BUNDLE_FILES := $(foreach arch,$(ARCHES),$(BUNDLES_DIR)/openssh-bundle-$(arch).tar.xz)
+BUNDLE_FILES := $(foreach arch,$(ARCHES),$(BUNDLES_DIR)/sshd_$(arch).xz)
 
 .PHONY: all build install lint format check clean bundles test
 
@@ -36,19 +35,18 @@ clean:
 
 bundles: $(BUNDLE_FILES)
 
-$(BUNDLES_DIR)/openssh-bundle-%.tar.xz: Dockerfile.bundle
+$(BUNDLES_DIR)/sshd_%.xz: Dockerfile.bundle
 	@mkdir -p $(dir $@)
 	@set -euo pipefail; \
 	ARCH="$*"; \
-	TAG="$${ARCH//\//-}"; \
+	PLATFORM="linux/$$ARCH"; \
 	BUNDLE_FILE="$(notdir $@)"; \
-	echo "Building bundle $$BUNDLE_FILE for $$ARCH"; \
-	DOCKER_BUILDKIT=1 $(DOCKER) build --platform $$ARCH \
+	echo "Building bundle $$BUNDLE_FILE for $$PLATFORM"; \
+	DOCKER_BUILDKIT=1 $(DOCKER) build --platform $$PLATFORM \
 		--build-arg OPENSSH_VERSION=$(OPENSSH_VERSION) \
-		--build-arg BUNDLE_VERSION=$(BUNDLE_VERSION) \
-		--build-arg BUNDLE_FILENAME=$$BUNDLE_FILE \
-		-t sshpod-bundle-$$TAG \
+		--build-arg BINARY_FILENAME=$$BUNDLE_FILE \
+		-t sshpod-bundle-$$ARCH \
 		-f Dockerfile.bundle .; \
-	CID="$$( $(DOCKER) create sshpod-bundle-$$TAG )"; \
+	CID="$$( $(DOCKER) create sshpod-bundle-$$ARCH )"; \
 	$(DOCKER) cp $$CID:/out/$$BUNDLE_FILE "$@"; \
 	$(DOCKER) rm $$CID >/dev/null
