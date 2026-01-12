@@ -104,16 +104,16 @@ jobs:
             BatchMode yes
           EOF
 
-          REMOTE_SCRIPT=$'set -eux\npwd\nid\nls -l /tmp/sshpod-e2e-marker || true\ntouch /tmp/sshpod-e2e-marker\nls -l /tmp/sshpod-e2e-marker\nyes ssh-ok | head -n 10000'
-          echo "remote script:"
-          printf '%s\n' "$REMOTE_SCRIPT"
+          REMOTE_SCRIPT=$'set -eu\npwd\nid\ntouch /tmp/sshpod-e2e-marker\nls -l /tmp/sshpod-e2e-marker\nyes ssh-ok | head -n 500'
+          SSH_LOG=/tmp/ssh_output
 
-          ssh -vvv -F /tmp/sshpod_config "root@pod--${POD_NAME}.namespace--default.context--${KUBE_CONTEXT}.sshpod" -- /bin/sh -lc "$REMOTE_SCRIPT" 2>&1 | tee /tmp/ssh_output
-          ok_lines="$(grep -c '^ssh-ok$' /tmp/ssh_output || true)"
-          echo "ssh-ok lines seen: ${ok_lines}"
+          ssh -v -F /tmp/sshpod_config "root@pod--${POD_NAME}.namespace--default.context--${KUBE_CONTEXT}.sshpod" -- /bin/sh -lc "$REMOTE_SCRIPT" >"$SSH_LOG" 2>&1
+
+          ok_lines="$(grep -c '^ssh-ok$' "$SSH_LOG" || true)"
+          echo "ssh-ok lines: ${ok_lines}"
           if [ "${ok_lines}" -lt 10 ]; then
-            echo "unexpected ssh output:"
-            cat /tmp/ssh_output
+            echo "unexpected ssh output (full log follows):"
+            cat "$SSH_LOG"
             echo "=== sshd log from pod (if present) ==="
             POD_UID="$(kubectl get pod "$POD_NAME" -o jsonpath='{.metadata.uid}')"
             kubectl exec "$POD_NAME" -- cat "/tmp/sshpod/${POD_UID}/${POD_NAME}/logs/sshd.log" || true
