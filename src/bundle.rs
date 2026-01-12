@@ -1,11 +1,12 @@
 use crate::{embedded, kubectl};
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use log::info;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::env;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use xz2::read::XzDecoder;
 
@@ -47,20 +48,16 @@ pub async fn ensure_bundle(
         kubectl::exec_capture_optional(context, namespace, pod, container, &["cat", &arch_path])
             .await?;
 
+    info!(
+        "[sshpod] checking bundle (remote version={:?}, remote arch={:?}, expected version={}, expected arch={})",
+        remote_version, remote_arch, BUNDLE_VERSION, arch
+    );
     if remote_version.as_deref() == Some(BUNDLE_VERSION) && remote_arch.as_deref() == Some(arch) {
+        info!("[sshpod] bundle already up to date");
         return Ok(());
     }
 
-    let bundle_data = if let Some(data) = embedded::get_bundle(arch) {
-        Cow::from(data)
-    } else {
-        let bundle_path = locate_bundle(arch)?;
-        Cow::from(
-            tokio::fs::read(&bundle_path)
-                .await
-                .with_context(|| format!("failed to read bundle {}", bundle_path.display()))?,
-        )
-    };
+    let bundle_data = load_bundle_data(arch).await?;
 
     let meta = format!(
         "printf '%s\\n' \"{BUNDLE_VERSION}\" > \"{base}/bundle/VERSION\"; \
@@ -72,65 +69,188 @@ pub async fn ensure_bundle(
         "set -eu; umask 077; mkdir -p \"{base}/bundle\"; chmod 700 \"{base}\" \"{base}/bundle\"; \
          xz -dc > \"{base}/bundle/sshd\"; chmod 700 \"{base}/bundle/sshd\"; {meta}"
     );
-    match kubectl::exec_with_input(
+    let install_gz = format!(
+        "set -eu; umask 077; mkdir -p \"{base}/bundle\"; chmod 700 \"{base}\" \"{base}/bundle\"; \
+         gzip -dc > \"{base}/bundle/sshd\"; chmod 700 \"{base}/bundle/sshd\"; {meta}"
+    );
+    let install_plain = format!(
+        "set -eu; umask 077; mkdir -p \"{base}/bundle\"; chmod 700 \"{base}\" \"{base}/bundle\"; \
+         cat > \"{base}/bundle/sshd\"; chmod 700 \"{base}/bundle/sshd\"; {meta}"
+    );
+    let mut sshd_data: Option<Vec<u8>> = None;
+
+    let xz_result = try_install_xz(
         context,
         namespace,
         pod,
         container,
-        &["sh", "-c", &install_xz],
         &bundle_data,
+        &install_xz,
+    )
+    .await;
+    if xz_result.is_ok() {
+        info!("[sshpod] bundle install completed");
+        return Ok(());
+    }
+    let xz_err = xz_result.err().unwrap();
+
+    let gzip_result = try_install_gzip(
+        context,
+        namespace,
+        pod,
+        container,
+        &bundle_data,
+        &install_gz,
+        &mut sshd_data,
+    )
+    .await;
+    if gzip_result.is_ok() {
+        info!("[sshpod] bundle install completed");
+        return Ok(());
+    }
+    let gzip_err = gzip_result.err().unwrap();
+
+    let sshd_data = ensure_plain_data(&bundle_data, &mut sshd_data)
+        .context("failed to prepare sshd payload for plain install")?;
+    install_bundle_with_command(
+        context,
+        namespace,
+        pod,
+        container,
+        &install_plain,
+        sshd_data,
+        "plain",
     )
     .await
-    {
-        Ok(_) => return Ok(()),
-        Err(first_err) => {
-            let sshd_data =
-                decompress_xz(&bundle_data).context("failed to decompress sshd xz locally")?;
-            let mut gz = GzEncoder::new(Vec::new(), Compression::default());
-            use std::io::Write;
-            gz.write_all(&sshd_data).context("failed to gzip sshd")?;
-            let gz_data = gz.finish().context("failed to finalize gzip")?;
+    .with_context(|| {
+        format!(
+            "failed to install bundle into {} (xz: {}; gzip: {})",
+            base, xz_err, gzip_err
+        )
+    })?;
 
-            let install_gz = format!(
-                "set -eu; umask 077; mkdir -p \"{base}/bundle\"; chmod 700 \"{base}\" \"{base}/bundle\"; \
-                 gzip -dc > \"{base}/bundle/sshd\"; chmod 700 \"{base}/bundle/sshd\"; {meta}"
-            );
-            match kubectl::exec_with_input(
-                context,
-                namespace,
-                pod,
-                container,
-                &["sh", "-c", &install_gz],
-                &gz_data,
-            )
+    info!("[sshpod] bundle install completed");
+    Ok(())
+}
+
+async fn load_bundle_data(arch: &str) -> Result<Cow<'static, [u8]>> {
+    if let Some(data) = embedded::get_bundle(arch) {
+        info!("[sshpod] using embedded bundle for {}", arch);
+        Ok(Cow::from(data))
+    } else {
+        let bundle_path = locate_bundle(arch)?;
+        info!("[sshpod] using local bundle file {}", bundle_path.display());
+        let bytes = tokio::fs::read(&bundle_path)
             .await
-            {
-                Ok(_) => return Ok(()),
-                Err(second_err) => {
-                    let install_plain = format!(
-                        "set -eu; umask 077; mkdir -p \"{base}/bundle\"; chmod 700 \"{base}\" \"{base}/bundle\"; \
-                         cat > \"{base}/bundle/sshd\"; chmod 700 \"{base}/bundle/sshd\"; {meta}"
-                    );
-                    kubectl::exec_with_input(
-                        context,
-                        namespace,
-                        pod,
-                        container,
-                        &["sh", "-c", &install_plain],
-                        &sshd_data,
-                    )
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "failed to install bundle into {} (xz error: {}; gzip error: {})",
-                            base, first_err, second_err
-                        )
-                    })?;
-                }
-            }
-        }
+            .with_context(|| format!("failed to read bundle {}", bundle_path.display()))?;
+        Ok(Cow::from(bytes))
     }
+}
 
+async fn tool_available(
+    context: Option<&str>,
+    namespace: &str,
+    pod: &str,
+    container: &str,
+    tool: &str,
+) -> Result<bool> {
+    Ok(kubectl::exec_capture_optional(
+        context,
+        namespace,
+        pod,
+        container,
+        &["sh", "-c", &format!("command -v {}", tool)],
+    )
+    .await?
+    .is_some())
+}
+
+fn ensure_plain_data<'a>(
+    bundle_data: &'a [u8],
+    cache: &'a mut Option<Vec<u8>>,
+) -> Result<&'a [u8]> {
+    if cache.is_none() {
+        *cache = Some(decompress_xz(bundle_data)?);
+    }
+    Ok(cache.as_ref().unwrap())
+}
+
+fn gzip_payload(data: &[u8]) -> Result<Vec<u8>> {
+    let mut gz = GzEncoder::new(Vec::new(), Compression::default());
+    gz.write_all(data).context("failed to write gzip payload")?;
+    gz.finish().context("failed to finalize gzip payload")
+}
+
+async fn try_install_xz(
+    context: Option<&str>,
+    namespace: &str,
+    pod: &str,
+    container: &str,
+    bundle_data: &[u8],
+    install_cmd: &str,
+) -> Result<()> {
+    if !tool_available(context, namespace, pod, container, "xz").await? {
+        info!("[sshpod] skipping xz install (xz not available)");
+        return Err(anyhow!("xz not available in container"));
+    }
+    install_bundle_with_command(
+        context,
+        namespace,
+        pod,
+        container,
+        install_cmd,
+        bundle_data,
+        "xz",
+    )
+    .await
+}
+
+async fn try_install_gzip(
+    context: Option<&str>,
+    namespace: &str,
+    pod: &str,
+    container: &str,
+    bundle_data: &[u8],
+    install_cmd: &str,
+    sshd_cache: &mut Option<Vec<u8>>,
+) -> Result<()> {
+    if !tool_available(context, namespace, pod, container, "gzip").await? {
+        info!("[sshpod] skipping gzip install (gzip not available)");
+        return Err(anyhow!("gzip not available in container"));
+    }
+    let sshd_data_ref = ensure_plain_data(bundle_data, sshd_cache)?;
+    let gz_data = gzip_payload(sshd_data_ref)?;
+    install_bundle_with_command(
+        context,
+        namespace,
+        pod,
+        container,
+        install_cmd,
+        &gz_data,
+        "gzip",
+    )
+    .await
+}
+
+async fn install_bundle_with_command(
+    context: Option<&str>,
+    namespace: &str,
+    pod: &str,
+    container: &str,
+    install_cmd: &str,
+    payload: &[u8],
+    label: &str,
+) -> Result<()> {
+    info!("[sshpod] installing bundle via {}", label);
+    kubectl::exec_with_input(
+        context,
+        namespace,
+        pod,
+        container,
+        &["sh", "-c", install_cmd],
+        payload,
+    )
+    .await?;
     Ok(())
 }
 
