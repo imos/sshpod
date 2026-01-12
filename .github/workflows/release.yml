@@ -6,9 +6,14 @@ on:
       version:
         description: "Release version (e.g. 0.2.0)"
         required: true
+  push:
+    branches:
+      - main
+  pull_request:
 
 jobs:
   create_release:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       upload_url: ${{ steps.release.outputs.upload_url }}
@@ -30,7 +35,6 @@ jobs:
           prerelease: false
 
   build:
-    needs: create_release
     strategy:
       fail-fast: false
       matrix:
@@ -45,7 +49,7 @@ jobs:
             target: x86_64-pc-windows-msvc
             arch_name: windows_amd64
     env:
-      VERSION: ${{ inputs.version }}
+      VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.sha }}
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -92,12 +96,40 @@ jobs:
           tar -czf $Asset -C $ArtifactDir .
           "asset_path=$Asset" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package_unix.outputs.asset_path || steps.package_windows.outputs.asset_path }}
+          path: ${{ steps.package_unix.outputs.asset_path || steps.package_windows.outputs.asset_path }}
+
+  upload_release_assets:
+    if: github.event_name == 'workflow_dispatch'
+    needs:
+      - create_release
+      - build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch_name: linux_amd64
+          - arch_name: darwin_arm64
+          - arch_name: windows_amd64
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sshpod_${{ env.VERSION }}_${{ matrix.arch_name }}.tar.gz
+          path: artifacts
+
       - name: Upload release asset
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create_release.outputs.upload_url }}
-          asset_path: ${{ steps.package_unix.outputs.asset_path || steps.package_windows.outputs.asset_path }}
-          asset_name: ${{ steps.package_unix.outputs.asset_path || steps.package_windows.outputs.asset_path }}
+          asset_path: artifacts/sshpod_${{ env.VERSION }}_${{ matrix.arch_name }}.tar.gz
+          asset_name: sshpod_${{ env.VERSION }}_${{ matrix.arch_name }}.tar.gz
           asset_content_type: application/gzip
