@@ -124,6 +124,13 @@ PUBKEY_LINE="$3"
 SSHD="$BASE/bundle/sshd"
 ENV_FILE="$BASE/environment"
 
+exec 3>&1
+exec 4>&2
+exec >"$BASE/logs/start.log" 2>&1
+debug_log() {
+  printf '[sshpod-init] %s\n' "$1" >&4
+}
+
 umask 077
 mkdir -p "$BASE" "$BASE/logs" "$BASE/hostkeys"
 chmod 700 "$BASE" "$BASE/hostkeys" "$BASE/logs"
@@ -131,13 +138,7 @@ BASE_PARENT="$(dirname "$BASE")"
 TOP_DIR="$(dirname "$BASE_PARENT")"
 chmod 711 "$TOP_DIR" "$BASE_PARENT"
 touch "$BASE/logs/start.log" || true
-
-exec 3>&1
-exec 4>&2
-exec >"$BASE/logs/start.log" 2>&1
-if [ "${SSHPOD_DEBUG_SSHD:-}" = "1" ] || [ "${SSHPOD_DEBUG_SSHD:-}" = "true" ]; then
-  set -x
-fi
+debug_log "start script begin (base=$BASE user=$LOGIN_USER)"
 
 dump_and_exit() {
   if [ -f "$BASE/logs/start.log" ]; then
@@ -172,6 +173,7 @@ chmod 600 "$BASE/authorized_keys"
 if [ -n "$LOGIN_USER" ]; then
   chown "$LOGIN_USER":"$LOGIN_USER" "$BASE" "$BASE/authorized_keys" 2>/dev/null || true
 fi
+debug_log "authorized_keys ready"
 
 mkdir -p /tmp/empty
 chmod 755 /tmp/empty
@@ -188,11 +190,13 @@ if [ ! -f "$BASE/hostkeys/ssh_host_ed25519_key" ]; then
   dump_and_exit 1
 fi
 chmod 600 "$BASE/hostkeys/"*
+debug_log "host keys ready"
 
 if [ -f "$BASE/sshd.pid" ] && kill -0 "$(cat "$BASE/sshd.pid")" 2>/dev/null && [ -f "$BASE/sshd.port" ]; then
   cat "$BASE/sshd.port" >&3
   exit 0
 fi
+debug_log "starting fresh sshd instance"
 
 rand_port() {
   val="$(od -An -N2 -tu2 /dev/urandom | tr -d ' ')"
@@ -202,6 +206,7 @@ rand_port() {
 REMOTE_PATH="${PATH:-/usr/bin:/bin}"
 ENV_EXPORTS="$(env | awk -F= '/^KUBERNETES_/ {print $1}')"
 USER_HOME="$(get_home "$LOGIN_USER")"
+debug_log "paths ready user_home=${USER_HOME:-unknown} env_exports=${ENV_EXPORTS}"
 
 i=0
 while [ $i -lt 30 ]; do
@@ -272,6 +277,7 @@ EOF
 
   chmod 600 "$BASE/sshd_config"
   rm -f "$BASE/sshd.pid"
+  debug_log "launching sshd on $PORT"
   "$SSHD" -f "$BASE/sshd_config" -E "$BASE/logs/sshd.log" </dev/null >/dev/null 2>&1 || true
   j=0
   while [ $j -lt 10 ]; do
@@ -284,6 +290,7 @@ EOF
     j=$((j+1))
     sleep 1
   done
+  debug_log "retrying sshd start (attempt $i)"
 done
 
 echo "sshd did not start" >&2
