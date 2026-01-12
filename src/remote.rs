@@ -69,14 +69,16 @@ pub async fn ensure_sshd_running(
     pubkey_line: &str,
 ) -> Result<u16> {
     let script = START_SSHD_SCRIPT.as_bytes();
-    let output = timeout(
-        Duration::from_secs(40),
-        kubectl::exec_with_input_target(
-            target,
-            &["sh", "-s", "--", base, login_user, pubkey_line],
-            script,
-        ),
-    )
+    let output = timeout(Duration::from_secs(40), {
+        async move {
+            kubectl::exec_with_input_target(
+                target,
+                &["sh", "-s", "--", base, login_user, pubkey_line],
+                script,
+            )
+            .await
+        }
+    })
     .await
     .map_err(|_| anyhow::anyhow!("starting sshd timed out after 40s"))?
     .with_context(|| format!("failed to start sshd under {}", base))?;
