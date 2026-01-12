@@ -103,9 +103,9 @@ jobs:
                 command: ["sh", "-c", "sleep 1000000000"]
                 resources:
                   requests:
-                    memory: 256Mi
-                  limits:
                     memory: 512Mi
+                  limits:
+                    memory: 1024Mi
           EOF
           else
             kubectl run "$POD_NAME" --image="${{ matrix.image }}" --restart=Never --command -- sh -c "sleep 1000000000"
