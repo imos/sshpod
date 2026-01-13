@@ -112,7 +112,12 @@ function Main {
     try {
         $assetPath = Join-Path $tmp $assetName
         Write-Host "Downloading $assetName ..."
-        Invoke-WebRequest -UseBasicParsing -Headers @{ "User-Agent" = "sshpod-install" } -Uri $url -OutFile $assetPath
+        try {
+            Invoke-WebRequest -UseBasicParsing -Headers @{ "User-Agent" = "sshpod-install" } -Uri $url -OutFile $assetPath
+        }
+        catch {
+            throw "Failed to download release asset from '$url'. Error: $($_.Exception.Message)"
+        }
 
         Expand-Archive -Path $assetPath -DestinationPath $binDir -Force
         $exe = Get-ChildItem -Path $binDir -Filter "sshpod.exe" -Recurse | Select-Object -First 1
