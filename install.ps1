@@ -1,8 +1,7 @@
 param(
     [string]$Version = "",
     [switch]$Yes,
-    [string]$Prefix = "",
-    [string]$BaseUrl = ""
+    [string]$Prefix = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,16 +33,6 @@ function Detect-Arch {
         "arm64" { "arm64" }
         default { throw "Unsupported arch: $($env:PROCESSOR_ARCHITECTURE). Supported: amd64, arm64." }
     }
-}
-
-function Get-BaseUrl([string]$Value) {
-    if (-not [string]::IsNullOrWhiteSpace($Value)) {
-        return $Value.TrimEnd("/")
-    }
-    if (-not [string]::IsNullOrWhiteSpace($env:SSHPOD_BASE_URL)) {
-        return $env:SSHPOD_BASE_URL.TrimEnd("/")
-    }
-    "https://github.com/imos/sshpod/releases/download"
 }
 
 function Get-Version([string]$Value) {
@@ -112,11 +101,8 @@ function Main {
     $prefix = Resolve-Prefix $Prefix
     $version = Get-Version $Version
     $arch = Detect-Arch
-    $baseUrl = Get-BaseUrl $BaseUrl
-    $candidates = @(
-        @{ Name = "sshpod_${version}_windows_${arch}.zip"; Kind = "zip" },
-        @{ Name = "sshpod_${version}_windows_${arch}.tar.gz"; Kind = "tar" }
-    )
+    $assetName = "sshpod_${version}_windows_${arch}.zip"
+    $url = "https://github.com/imos/sshpod/releases/download/v${version}/${assetName}"
 
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("sshpod-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $tmp -Force | Out-Null
@@ -124,40 +110,11 @@ function Main {
     New-Item -ItemType Directory -Path $binDir -Force | Out-Null
 
     try {
-        $downloaded = $false
-        $assetPath = $null
-        $assetKind = $null
-        $errors = @()
-        foreach ($candidate in $candidates) {
-            $assetPath = Join-Path $tmp $candidate.Name
-            $url = "$baseUrl/v${version}/$($candidate.Name)"
-            Write-Host "Downloading $($candidate.Name) ..."
-            try {
-                Invoke-WebRequest -UseBasicParsing -Headers @{ "User-Agent" = "sshpod-install" } -Uri $url -OutFile $assetPath
-                $assetKind = $candidate.Kind
-                $downloaded = $true
-                break
-            }
-            catch {
-                $errors += "$($candidate.Name): $($_.Exception.Message)"
-            }
-        }
-        if (-not $downloaded) {
-            throw "Failed to download release asset for v${version}. Attempts: $($errors -join '; ')"
-        }
+        $assetPath = Join-Path $tmp $assetName
+        Write-Host "Downloading $assetName ..."
+        Invoke-WebRequest -UseBasicParsing -Headers @{ "User-Agent" = "sshpod-install" } -Uri $url -OutFile $assetPath
 
-        if ($assetKind -eq "zip") {
-            Expand-Archive -Path $assetPath -DestinationPath $binDir -Force
-        }
-        else {
-            if (-not (Get-Command "tar" -ErrorAction SilentlyContinue)) {
-                throw "tar not found to extract $assetPath"
-            }
-            & tar -xzf $assetPath -C $binDir
-            if ($LASTEXITCODE -ne 0) {
-                throw "tar extraction failed for $assetPath"
-            }
-        }
+        Expand-Archive -Path $assetPath -DestinationPath $binDir -Force
         $exe = Get-ChildItem -Path $binDir -Filter "sshpod.exe" -Recurse | Select-Object -First 1
         if (-not $exe) {
             throw "sshpod.exe not found in downloaded archive"

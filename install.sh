@@ -4,7 +4,6 @@ set -eu
 VERSION=""
 YES=0
 PREFIX="${HOME}/.local/bin"
-BASE_URL="${SSHPOD_BASE_URL:-https://github.com/imos/sshpod/releases/download}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -79,7 +78,7 @@ fi
 
 ARCH_NAME="$(detect_arch)"
 ASSET="sshpod_${VERSION}_${ARCH_NAME}.tar.gz"
-URL="${BASE_URL%/}/v${VERSION}/${ASSET}"
+URL="https://github.com/imos/sshpod/releases/download/v${VERSION}/${ASSET}"
 
 TMPDIR="$(mktemp -d)"
 cleanup() { rm -rf "$TMPDIR"; }
